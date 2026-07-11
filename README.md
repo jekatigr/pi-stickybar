@@ -4,7 +4,7 @@ Input bar extension for [pi](https://github.com/badlogic/pi-mono) coding agent.
 
 ## Preview
 
-![StickyBar preview](./docs/preview.gif)
+![StickyBar preview](https://raw.githubusercontent.com/jekatigr//pi-stickybar/main/docs/preview.gif)
 
 ## Features
 
