@@ -16,6 +16,9 @@ let recent: string[] = [];
 let fileVibes: string[] = [];
 let fileTheme: string | null = null;
 let fileIndex = 0;
+let lastTask = "";
+let preparedNext: string | null = null;
+let preparing: Promise<void> | null = null;
 
 function vibeDir(): string {
   return join(getAgentDir(), "vibes");
@@ -120,20 +123,46 @@ export function initVibeManager(extensionContext: ExtensionContext, settings: Vi
   streaming = false;
   currentText = "";
   recent = [];
+  preparedNext = null;
+  preparing = null;
   generation?.abort();
   stopAnimation();
+  void prepareNext();
 }
 
 export function updateVibeSettings(settings: VibeSettings): void {
+  const themeOrModelChanged = config?.theme !== settings.theme || config?.model !== settings.model || config?.mode !== settings.mode;
   config = settings;
   if (!settings.rainbow) stopAnimation();
+  if (themeOrModelChanged) preparedNext = null;
+}
+
+async function prepareNext(): Promise<void> {
+  if (!config?.theme || config.mode === "file") return;
+  if (preparing) return preparing;
+  const task = lastTask || "a new task";
+  const run = (async () => {
+    const value = await generate(task);
+    preparedNext = value;
+  })();
+  preparing = run.finally(() => {
+    if (preparing === run) preparing = null;
+  });
+  return preparing;
 }
 
 export function onVibeBeforeAgentStart(task: string, setWorkingMessage: (text?: string) => void): void {
   if (!config?.theme) return;
+  lastTask = task;
   lastRefresh = Date.now();
-  emit(setWorkingMessage, `Working ${config.theme}`);
-  void refresh(task, setWorkingMessage);
+  if (config.mode !== "file" && preparedNext) {
+    emit(setWorkingMessage, preparedNext);
+    preparedNext = null;
+    void prepareNext();
+  } else {
+    emit(setWorkingMessage, `Working ${config.theme}`);
+    void refresh(task, setWorkingMessage);
+  }
 }
 
 export function onVibeAgentStart(setWorkingMessage: (text?: string) => void): void {
@@ -158,6 +187,7 @@ export function onVibeAgentEnd(setWorkingMessage: (text?: string) => void): void
   stopAnimation();
   currentText = "";
   setWorkingMessage();
+  void prepareNext();
 }
 
 export function hasVibeFile(theme: string): boolean { return existsSync(vibePath(theme)); }
