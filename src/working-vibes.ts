@@ -145,10 +145,11 @@ async function prepareNext(): Promise<void> {
     const value = await generate(task);
     preparedNext = value;
   })();
-  preparing = run.finally(() => {
+  preparing = run;
+  void run.finally(() => {
     if (preparing === run) preparing = null;
   });
-  return preparing;
+  return run;
 }
 
 export function onVibeBeforeAgentStart(task: string, setWorkingMessage: (text?: string) => void): void {
