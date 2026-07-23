@@ -9,6 +9,7 @@ test("stickybar defaults to the single built-in layout", () => {
   assert.equal(config.fixedEditor, true);
   assert.equal(config.mouseScroll, true);
   assert.equal(config.vibe.theme, null);
+  assert.equal(config.vibe.lookback, 30);
 });
 
 test("custom items are placed directly in the configured line order", () => {
@@ -23,11 +24,19 @@ test("custom items are placed directly in the configured line order", () => {
 
 test("vibe settings are nested under stickybar and validated", () => {
   const config = parseStickybarConfig({
-    vibe: { theme: "pirate", mode: "file", rainbow: true, model: "openai/gpt-test", refreshInterval: 5 },
+    vibe: { theme: "pirate", mode: "file", rainbow: true, model: "openai/gpt-test", refreshInterval: 5, lookback: 10 },
   });
   assert.equal(config.vibe.theme, "pirate");
   assert.equal(config.vibe.mode, "file");
   assert.equal(config.vibe.rainbow, true);
   assert.equal(config.vibe.model, "openai/gpt-test");
   assert.equal(config.vibe.refreshInterval, 5);
+  assert.equal(config.vibe.lookback, 10);
+});
+
+test("vibe lookback falls back to default on invalid values", () => {
+  const negative = parseStickybarConfig({ vibe: { lookback: -5 } });
+  assert.equal(negative.vibe.lookback, 0);
+  const invalid = parseStickybarConfig({ vibe: { lookback: "a lot" } });
+  assert.equal(invalid.vibe.lookback, 30);
 });

@@ -59,6 +59,7 @@ export interface VibeSettings {
   refreshInterval: number;
   prompt: string;
   maxLength: number;
+  lookback: number;
 }
 
 export interface CustomStatusItem {

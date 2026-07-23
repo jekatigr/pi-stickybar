@@ -1,6 +1,7 @@
 import { complete, type Context } from "@earendil-works/pi-ai/compat";
 import { getAgentDir, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { rainbow } from "./colors.ts";
 import type { VibeSettings } from "./types.ts";
@@ -19,14 +20,51 @@ let fileIndex = 0;
 let lastTask = "";
 let preparedNext: string | null = null;
 let preparing: Promise<void> | null = null;
+let settingsVersion = 0;
 
 function vibeDir(): string {
   return join(getAgentDir(), "vibes");
 }
 
+function slug(theme: string): string {
+  return theme.toLowerCase().trim().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "theme";
+}
+
 function vibePath(theme: string): string {
-  const slug = theme.toLowerCase().trim().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "theme";
-  return join(vibeDir(), `${slug}.txt`);
+  return join(vibeDir(), `${slug(theme)}.txt`);
+}
+
+function historyPath(theme: string): string {
+  return join(vibeDir(), `${slug(theme)}.history.json`);
+}
+
+/** Best-effort, non-blocking: never awaited by callers so disk I/O can't stall the UI. */
+async function loadHistory(theme: string): Promise<string[]> {
+  try {
+    const parsed = JSON.parse(await readFile(historyPath(theme), "utf8"));
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveHistory(theme: string, values: string[]): Promise<void> {
+  try {
+    await mkdir(vibeDir(), { recursive: true });
+    await writeFile(historyPath(theme), JSON.stringify(values));
+  } catch {
+    // best-effort persistence; a failed write just means dedup resets next session
+  }
+}
+
+/** Loads persisted history for `theme` into `recent`, guarding against a theme switch mid-flight. */
+async function loadRecentHistory(theme: string | null, lookback: number, version = settingsVersion): Promise<void> {
+  if (!theme || lookback <= 0) {
+    if (version === settingsVersion) recent = [];
+    return;
+  }
+  const history = await loadHistory(theme);
+  if (version === settingsVersion && config?.theme === theme) recent = history.slice(0, lookback);
 }
 
 function message(text: string): string {
@@ -81,36 +119,38 @@ function nextFileVibe(): string {
   return value;
 }
 
-function prompt(task: string): string {
-  const theme = config?.theme ?? "";
-  const exclude = recent.length ? `Avoid: ${recent.join(", ")}` : "";
-  return (config?.prompt ?? "Generate a {theme} loading message for: {task}")
-    .replaceAll("{theme}", theme)
+function prompt(task: string, settings: VibeSettings): string {
+  const exclude = settings.lookback > 0 && recent.length ? `Avoid: ${recent.join(", ")}` : "";
+  return settings.prompt
+    .replaceAll("{theme}", settings.theme ?? "")
     .replaceAll("{task}", task.slice(0, 150))
     .replaceAll("{exclude}", exclude);
 }
 
 async function generate(task: string): Promise<string> {
-  if (!context || !config?.theme) return fallback();
-  const [provider, ...modelParts] = config.model.split("/");
+  const settings = config;
+  const version = settingsVersion;
+  if (!context || !settings?.theme) return fallback();
+  const [provider, ...modelParts] = settings.model.split("/");
   const modelId = modelParts.join("/");
   const model = provider && modelId ? context.modelRegistry.find(provider, modelId) : undefined;
   if (!model) return fallback();
-  const auth = await context.modelRegistry.getApiKeyAndHeaders(model);
-  if (!auth.ok) return fallback();
-  const aiContext: Context = {
-    systemPrompt: "Reply with one short loading message and nothing else.",
-    messages: [{ role: "user", content: [{ type: "text", text: prompt(task) }], timestamp: Date.now() }],
-  };
   const controller = new AbortController();
   generation?.abort();
   generation = controller;
+  const auth = await context.modelRegistry.getApiKeyAndHeaders(model);
+  if (!auth.ok || controller.signal.aborted || version !== settingsVersion) return fallback();
+  const aiContext: Context = {
+    systemPrompt: "Reply with one short loading message and nothing else. Capitalize only the first letter; avoid PascalCase or Title Case.",
+    messages: [{ role: "user", content: [{ type: "text", text: prompt(task, settings) }], timestamp: Date.now() }],
+  };
   try {
     const response = await complete(model, aiContext, { apiKey: auth.apiKey, headers: auth.headers, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(3000)]) });
     const text = response.content.find((part) => part.type === "text")?.text;
-    if (!text || controller.signal.aborted) return fallback();
+    if (!text || controller.signal.aborted || version !== settingsVersion) return fallback();
     const value = message(text.split("\n")[0] ?? "");
-    recent = [value, ...recent.filter((item) => item !== value)].slice(0, 5);
+    recent = [value, ...recent.filter((item) => item !== value)].slice(0, settings.lookback);
+    if (settings.lookback > 0) void saveHistory(settings.theme, recent);
     return value;
   } catch {
     return fallback();
@@ -119,31 +159,45 @@ async function generate(task: string): Promise<string> {
 
 export function initVibeManager(extensionContext: ExtensionContext, settings: VibeSettings): void {
   context = extensionContext;
-  config = settings;
+  config = { ...settings };
+  settingsVersion++;
   streaming = false;
   currentText = "";
   recent = [];
   preparedNext = null;
   preparing = null;
   generation?.abort();
+  generation = null;
   stopAnimation();
-  void prepareNext();
+  const version = settingsVersion;
+  void loadRecentHistory(settings.theme, settings.lookback).then(() => prepareNext(version));
 }
 
 export function updateVibeSettings(settings: VibeSettings): void {
-  const themeOrModelChanged = config?.theme !== settings.theme || config?.model !== settings.model || config?.mode !== settings.mode;
-  config = settings;
+  const themeChanged = config?.theme !== settings.theme;
+  settingsVersion++;
+  generation?.abort();
+  generation = null;
+  preparing = null;
+  config = { ...settings };
   if (!settings.rainbow) stopAnimation();
-  if (themeOrModelChanged) preparedNext = null;
+  preparedNext = null;
+  if (themeChanged) {
+    recent = [];
+    void loadRecentHistory(settings.theme, settings.lookback, settingsVersion);
+  } else {
+    recent = recent.slice(0, Math.max(0, settings.lookback));
+  }
 }
 
-async function prepareNext(): Promise<void> {
-  if (!config?.theme || config.mode === "file") return;
+async function prepareNext(version = settingsVersion): Promise<void> {
+  const theme = config?.theme;
+  if (version !== settingsVersion || !theme || config?.mode === "file") return;
   if (preparing) return preparing;
   const task = lastTask || "a new task";
   const run = (async () => {
     const value = await generate(task);
-    preparedNext = value;
+    if (version === settingsVersion && config?.theme === theme && config.mode !== "file") preparedNext = value;
   })();
   preparing = run;
   void run.finally(() => {
@@ -178,7 +232,9 @@ export function onVibeToolCall(task: string, setWorkingMessage: (text?: string) 
 }
 
 async function refresh(task: string, setWorkingMessage: (text?: string) => void): Promise<void> {
+  const version = settingsVersion;
   const value = config?.mode === "file" ? nextFileVibe() : await generate(task);
+  if (version !== settingsVersion) return;
   if (streaming || currentText) emit(setWorkingMessage, value);
 }
 

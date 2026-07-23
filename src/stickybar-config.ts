@@ -20,8 +20,9 @@ const DEFAULT_VIBE: VibeSettings = {
   rainbow: false,
   fallback: "Working",
   refreshInterval: 30,
-  prompt: "Generate a 2-4 word {theme} themed loading message ending in ... for: {task}. {exclude} Output only the message.",
+  prompt: "Generate a 2-4 word {theme} themed loading message ending in ... for: {task}. Capitalize only the first letter, avoid PascalCase or Title Case. {exclude} Output only the message.",
   maxLength: 65,
+  lookback: 30,
 };
 
 export const DEFAULT_STICKYBAR_CONFIG: StickybarConfig = {
@@ -142,6 +143,8 @@ function parseVibe(value: unknown): VibeSettings {
     prompt: typeof value.prompt === "string" && value.prompt.trim() ? value.prompt : DEFAULT_VIBE.prompt,
     maxLength: typeof value.maxLength === "number" && Number.isFinite(value.maxLength)
       ? Math.max(4, Math.floor(value.maxLength)) : DEFAULT_VIBE.maxLength,
+    lookback: typeof value.lookback === "number" && Number.isFinite(value.lookback)
+      ? Math.max(0, Math.floor(value.lookback)) : DEFAULT_VIBE.lookback,
   };
 }
 

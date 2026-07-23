@@ -72,7 +72,8 @@ Full configuration example:
       "fallback": "Working",
       "refreshInterval": 30,
       "prompt": "Generate a {theme} loading message for: {task}. {exclude}",
-      "maxLength": 65
+      "maxLength": 65,
+      "lookback": 30
     }
   }
 }
@@ -167,5 +168,7 @@ Manage vibes from pi with `/stickybar vibe`:
 ```
 
 `generate` mode requests a short message from the configured model while Pi is working. `file` mode rotates through messages in `~/.pi/agent/vibes/<theme>.txt` and does not make a model request.
+
+In `generate` mode, the last `lookback` messages (default `30`) are fed back to the model as an exclusion list to reduce repeats, and are persisted per-theme to `~/.pi/agent/vibes/<theme>.history.json` so the exclusion list survives across sessions. Loading/saving this history is fire-and-forget and never blocks the UI. Set `lookback` to `0` to disable both the exclusion list and persistence.
 
 > This project is a rework of [pi-powerline-footer](https://github.com/nicobailon/pi-powerline-footer) with simplified approach to customization and limited feature list.
