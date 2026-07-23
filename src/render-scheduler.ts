@@ -8,7 +8,13 @@ export function createRenderScheduler(render: () => void, defaultDelayMs: number
 
   return {
     schedule(delayMs = defaultDelayMs) {
-      if (timer) return;
+      if (timer) {
+        // An explicit immediate render must not be held behind a throttled
+        // context update that was queued while the model was streaming.
+        if (delayMs !== 0) return;
+        clearTimeout(timer);
+        timer = null;
+      }
 
       timer = setTimeout(() => {
         timer = null;

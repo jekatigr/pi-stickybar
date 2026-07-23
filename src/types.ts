@@ -102,7 +102,7 @@ export interface SegmentContext {
   sessionId: string | undefined;
   cwd?: string;
   usageStats: UsageStats;
-  contextPercent: number;
+  contextPercent: number | null;
   contextWindow: number;
   autoCompactEnabled: boolean;
   customCompactionEnabled: boolean;

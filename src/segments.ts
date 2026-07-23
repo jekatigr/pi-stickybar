@@ -62,9 +62,12 @@ const segments: StatusLineSegment[] = [
   simple("cost", (ctx) => ctx.usingSubscription || ctx.usageStats.cost ? { content: color(ctx.theme, "cost", ctx.usingSubscription ? "sub" : `$${ctx.usageStats.cost.toFixed(2)}`), visible: true } : { content: "", visible: false }),
   simple("context_pct", (ctx) => {
     if (ctx.customCompactionEnabled || !ctx.contextWindow) return { content: "", visible: false };
-    const shade: SemanticColor = ctx.contextPercent > 90 ? "contextError" : ctx.contextPercent > 70 ? "contextWarn" : "context";
+    const shade: SemanticColor = ctx.contextPercent !== null && ctx.contextPercent > 90
+      ? "contextError"
+      : ctx.contextPercent !== null && ctx.contextPercent > 70 ? "contextWarn" : "context";
     const autoCompact = ctx.autoCompactEnabled ? " AC" : "";
-    return { content: color(ctx.theme, shade, `◫ ${ctx.contextPercent.toFixed(1)}%/${formatTokens(ctx.contextWindow)}${autoCompact}`), visible: true };
+    const percent = ctx.contextPercent === null ? "?" : `${ctx.contextPercent.toFixed(1)}%`;
+    return { content: color(ctx.theme, shade, `◫ ${percent}/${formatTokens(ctx.contextWindow)}${autoCompact}`), visible: true };
   }),
   simple("context_total", (ctx) => ctx.customCompactionEnabled || !ctx.contextWindow ? { content: "", visible: false } : { content: color(ctx.theme, "context", `◫ ${formatTokens(ctx.contextWindow)}`), visible: true }),
   simple("time_spent", (ctx) => {

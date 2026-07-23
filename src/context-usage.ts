@@ -1,7 +1,7 @@
 interface CoreContextUsage {
-  contextTokens: number;
+  contextTokens: number | null;
   contextWindow: number;
-  contextPercent: number;
+  contextPercent: number | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -21,13 +21,19 @@ export function readCoreContextUsage(ctx: unknown): CoreContextUsage | null {
   const tokens = usage.tokens;
   const contextWindow = usage.contextWindow;
   if (
-    typeof tokens !== "number"
-    || !Number.isFinite(tokens)
+    (tokens !== null && (typeof tokens !== "number" || !Number.isFinite(tokens)))
     || typeof contextWindow !== "number"
     || !Number.isFinite(contextWindow)
     || contextWindow <= 0
   ) {
     return null;
+  }
+
+  // Pi deliberately reports an unknown usage immediately after compaction until
+  // the next assistant response. Preserve that state instead of letting callers
+  // fall back to the stale pre-compaction assistant usage.
+  if (tokens === null) {
+    return { contextTokens: null, contextWindow, contextPercent: null };
   }
 
   const percent = usage.percent;

@@ -136,7 +136,9 @@ export default function stickybar(pi: ExtensionAPI) {
     const activeUsage = streaming ? liveUsage ?? latest : latest;
     const coreUsage = streaming && liveUsage ? null : readCoreContextUsage(currentCtx);
     const contextWindow = coreUsage?.contextWindow ?? activeModel?.contextWindow ?? currentCtx?.model?.contextWindow ?? 0;
-    const contextTokens = coreUsage?.contextTokens ?? (activeUsage ? usageTokens(activeUsage) : 0);
+    const contextPercent = coreUsage
+      ? coreUsage.contextPercent
+      : (contextWindow ? (activeUsage ? usageTokens(activeUsage) / contextWindow * 100 : 0) : 0);
     const extensionStatuses = footerData?.getExtensionStatuses() ?? new Map<string, string>();
     return {
       model: activeModel ?? currentCtx?.model,
@@ -144,7 +146,7 @@ export default function stickybar(pi: ExtensionAPI) {
       sessionId: currentCtx?.sessionManager?.getSessionId?.(),
       cwd: currentCtx?.cwd,
       usageStats: { input, output, cacheRead, cacheWrite, cost },
-      contextPercent: coreUsage?.contextPercent ?? (contextWindow ? contextTokens / contextWindow * 100 : 0),
+      contextPercent,
       contextWindow,
       autoCompactEnabled: currentCtx?.settingsManager?.getCompactionSettings?.()?.enabled ?? true,
       customCompactionEnabled: customCompaction || extensionStatuses.has(CUSTOM_COMPACTION_STATUS_KEY),
@@ -416,6 +418,13 @@ export default function stickybar(pi: ExtensionAPI) {
   });
   pi.on("thinking_level_select", async (event, ctx) => { currentCtx = ctx; thinkingLevel = event.level; invalidate(true); });
   pi.on("session_tree", async (_event, ctx) => { currentCtx = ctx; thinkingLevel = null; liveUsage = null; invalidate(true); });
+  pi.on("session_compact", async (_event, ctx) => {
+    currentCtx = ctx;
+    // The previous assistant usage describes the pre-compaction context. Pi
+    // reports usage as unknown until the next response, so do not reuse it.
+    liveUsage = null;
+    invalidate(true);
+  });
 
   pi.on("before_agent_start", async (event, ctx) => {
     currentCtx = ctx;

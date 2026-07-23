@@ -33,3 +33,10 @@ test("top-row overflow is prepended to the bottom row", () => {
   assert.equal(layout.top, "session:abcdefgh");
   assert.match(layout.bottom, /model/);
 });
+
+test("shows unknown context usage after compaction instead of stale usage", () => {
+  const config = parseStickybarConfig({ top: ["context_pct"], bottom: [] });
+  const layout = renderStatusLayout(config, { ...context, contextPercent: null, contextWindow: 200_000 }, 80);
+
+  assert.equal(layout.top, "◫ ?/200k AC");
+});
