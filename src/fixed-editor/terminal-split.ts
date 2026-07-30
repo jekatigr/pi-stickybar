@@ -644,6 +644,26 @@ export class TerminalSplitCompositor {
     return this.updateVisibleRootWindow(scrollableRows);
   }
 
+  // Recomputes scroll bounds (max offset / clamped offset) from the *already cached*
+  // `rootLines` without re-invoking the underlying app's full-tree render. `rootLines`
+  // is kept fresh by `refreshRootWindow`, which runs on every real render pass
+  // (`renderScrollableRoot`, driven by pi's own throttled render scheduler) - content
+  // never changes purely as a result of scrolling, so reusing it here is safe and
+  // avoids paying an O(transcript size) cost on every mouse-wheel/keyboard scroll tick.
+  private syncScrollBounds(width: number): { cluster: FixedEditorClusterRender; scrollableRows: number } {
+    const rawRows = this.getRawRows();
+    const cluster = this.getCluster(width, rawRows);
+    const scrollableRows = Math.max(1, rawRows - cluster.lines.length);
+    const previousMaxScrollOffset = this.maxScrollOffset;
+    this.maxScrollOffset = Math.max(0, this.rootLines.length - scrollableRows);
+    const nextScrollOffset = Math.max(0, Math.min(this.scrollOffset, this.maxScrollOffset));
+    if (nextScrollOffset !== this.scrollOffset || this.maxScrollOffset !== previousMaxScrollOffset) {
+      this.pendingImageCleanup = true;
+    }
+    this.scrollOffset = nextScrollOffset;
+    return { cluster, scrollableRows };
+  }
+
   private handleInput(data: string): { consume?: boolean; data?: string } | undefined {
     if (this.disposed) return undefined;
 
@@ -698,7 +718,12 @@ export class TerminalSplitCompositor {
       return;
     }
 
-    this.refreshRootWindow(Math.max(1, this.terminal.columns || 80));
+    // Non-scroll packets (clicks/drags) need up-to-date visible-window bounds for
+    // hit-testing, but must not pay the cost of re-rendering the entire transcript
+    // (which `refreshRootWindow` does via the underlying app render). Reuse the
+    // already-cached root lines and just resync the cheap viewport bookkeeping.
+    const { scrollableRows } = this.syncScrollBounds(Math.max(1, this.terminal.columns || 80));
+    this.updateVisibleRootWindow(scrollableRows);
     const location = this.selectionLocationForPacket(packet);
 
     if (isRightPress(packet)) {
@@ -938,7 +963,7 @@ export class TerminalSplitCompositor {
       return;
     }
 
-    this.refreshRootWindow(width);
+    const { cluster } = this.syncScrollBounds(width);
 
     const nextOffset = Math.max(0, Math.min(this.scrollOffset + delta, this.maxScrollOffset));
     if (nextOffset === this.scrollOffset) return;
@@ -947,7 +972,7 @@ export class TerminalSplitCompositor {
     this.lastLeftPress = null;
     this.scrollOffset = nextOffset;
     this.pendingImageCleanup = true;
-    this.repaintScrollableViewport(width);
+    this.repaintScrollableViewport(width, cluster);
     this.requestRender();
   }
 
@@ -957,11 +982,10 @@ export class TerminalSplitCompositor {
     }
   }
 
-  private repaintScrollableViewport(width: number): void {
+  private repaintScrollableViewport(width: number, cluster: FixedEditorClusterRender): void {
     if (this.disposed || this.writing || this.hasVisibleOverlay()) return;
 
     const rawRows = this.getRawRows();
-    const cluster = this.getCluster(width, rawRows);
     const scrollableRows = Math.max(1, rawRows - cluster.lines.length);
     const start = this.updateVisibleRootWindow(scrollableRows);
     let buffer = beginSynchronizedOutput()
