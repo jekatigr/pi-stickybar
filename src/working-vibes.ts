@@ -12,7 +12,11 @@ let streaming = false;
 let generation: AbortController | null = null;
 let lastRefresh = 0;
 let currentText = "";
+let visibleText = "";
 let animation: ReturnType<typeof setInterval> | null = null;
+let printingAnimation: ReturnType<typeof setInterval> | null = null;
+
+const PRINTING_INTERVAL_MS = 15;
 let recent: string[] = [];
 let fileVibes: string[] = [];
 let fileTheme: string | null = null;
@@ -78,22 +82,52 @@ function fallback(): string {
   return message(config?.fallback ?? "Working");
 }
 
-function emit(setWorkingMessage: (text?: string) => void, text: string): void {
-  currentText = text;
+function render(setWorkingMessage: (text?: string) => void, text: string): void {
   setWorkingMessage(config?.rainbow ? rainbow(text) : text);
 }
 
+function stopPrinting(): void {
+  if (printingAnimation) clearInterval(printingAnimation);
+  printingAnimation = null;
+}
+
+function emit(setWorkingMessage: (text?: string) => void, text: string): void {
+  stopPrinting();
+  currentText = text;
+  visibleText = text;
+  render(setWorkingMessage, text);
+}
+
+/** Reveals refreshed vibes one Unicode character at a time. */
+function print(setWorkingMessage: (text?: string) => void, text: string): void {
+  stopPrinting();
+  currentText = text;
+  if (!config?.printing || !text) return emit(setWorkingMessage, text);
+
+  const characters = Array.from(text);
+  let length = 0;
+  visibleText = "";
+  render(setWorkingMessage, visibleText);
+  printingAnimation = setInterval(() => {
+    length++;
+    visibleText = characters.slice(0, length).join("");
+    render(setWorkingMessage, visibleText);
+    if (length >= characters.length) stopPrinting();
+  }, PRINTING_INTERVAL_MS);
+}
+
 function startAnimation(setWorkingMessage: (text?: string) => void): void {
-  stopAnimation();
+  if (animation) clearInterval(animation);
   if (!config?.rainbow) return;
   animation = setInterval(() => {
-    if (streaming && currentText) setWorkingMessage(rainbow(currentText));
+    if (streaming && currentText) render(setWorkingMessage, visibleText);
   }, 100);
 }
 
 function stopAnimation(): void {
   if (animation) clearInterval(animation);
   animation = null;
+  stopPrinting();
 }
 
 function loadFile(theme: string): string[] {
@@ -163,6 +197,7 @@ export function initVibeManager(extensionContext: ExtensionContext, settings: Vi
   settingsVersion++;
   streaming = false;
   currentText = "";
+  visibleText = "";
   recent = [];
   preparedNext = null;
   preparing = null;
@@ -180,7 +215,11 @@ export function updateVibeSettings(settings: VibeSettings): void {
   generation = null;
   preparing = null;
   config = { ...settings };
-  if (!settings.rainbow) stopAnimation();
+  if (!settings.rainbow && animation) {
+    clearInterval(animation);
+    animation = null;
+  }
+  stopPrinting();
   preparedNext = null;
   if (themeChanged) {
     recent = [];
@@ -211,7 +250,7 @@ export function onVibeBeforeAgentStart(task: string, setWorkingMessage: (text?: 
   lastTask = task;
   lastRefresh = Date.now();
   if (config.mode !== "file" && preparedNext) {
-    emit(setWorkingMessage, preparedNext);
+    print(setWorkingMessage, preparedNext);
     preparedNext = null;
     void prepareNext();
   } else {
@@ -235,7 +274,7 @@ async function refresh(task: string, setWorkingMessage: (text?: string) => void)
   const version = settingsVersion;
   const value = config?.mode === "file" ? nextFileVibe() : await generate(task);
   if (version !== settingsVersion) return;
-  if (streaming || currentText) emit(setWorkingMessage, value);
+  if (streaming || currentText) print(setWorkingMessage, value);
 }
 
 export function onVibeAgentEnd(setWorkingMessage: (text?: string) => void): void {
@@ -243,6 +282,7 @@ export function onVibeAgentEnd(setWorkingMessage: (text?: string) => void): void
   generation?.abort();
   stopAnimation();
   currentText = "";
+  visibleText = "";
   setWorkingMessage();
   void prepareNext();
 }

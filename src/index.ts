@@ -352,16 +352,17 @@ export default function stickybar(pi: ExtensionAPI) {
         return;
       }
       if (words[0] !== "vibe") {
-        ctx.ui.notify("Usage: /stickybar [vibe [theme|off|mode|model|rainbow|generate]]", "info");
+        ctx.ui.notify("Usage: /stickybar [vibe [theme|off|mode|model|rainbow|printing|generate]]", "info");
         return;
       }
       const action = words[1]?.toLowerCase();
       if (!action) {
-        ctx.ui.notify(`Vibe: ${config.vibe.theme ?? "off"}; ${config.vibe.mode}; ${config.vibe.rainbow ? "rainbow" : "plain"}; ${config.vibe.model}`, "info");
+        ctx.ui.notify(`Vibe: ${config.vibe.theme ?? "off"}; ${config.vibe.mode}; ${config.vibe.rainbow ? "rainbow" : "plain"}; ${config.vibe.printing ? "printing" : "instant"}; ${config.vibe.model}`, "info");
         return;
       }
       if (action === "off") config.vibe.theme = null;
       else if (action === "rainbow") config.vibe.rainbow = words[2] === "on" ? true : words[2] === "off" ? false : !config.vibe.rainbow;
+      else if (action === "printing") config.vibe.printing = words[2] === "on" ? true : words[2] === "off" ? false : !config.vibe.printing;
       else if (action === "mode") {
         if (words[2] !== "generate" && words[2] !== "file") return ctx.ui.notify("Usage: /stickybar vibe mode generate|file", "warning");
         if (words[2] === "file" && config.vibe.theme && !hasVibeFile(config.vibe.theme)) return ctx.ui.notify("Generate a vibe file before selecting file mode", "warning");

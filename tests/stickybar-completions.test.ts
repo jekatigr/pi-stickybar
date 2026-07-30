@@ -38,10 +38,11 @@ test("'vibe' without trailing space matches vibe", () => {
 test("'vibe ' with trailing space returns all vibe actions", () => {
   const result = getStickybarArgumentCompletions("vibe ");
   assert.ok(result);
-  assert.equal(result.length, 5); // off, rainbow, mode, model, generate
+  assert.equal(result.length, 6); // off, rainbow, printing, mode, model, generate
   const values = result.map((r) => r.value);
   assert.ok(values.includes("off"));
   assert.ok(values.includes("rainbow"));
+  assert.ok(values.includes("printing"));
   assert.ok(values.includes("mode"));
   assert.ok(values.includes("model"));
   assert.ok(values.includes("generate"));
@@ -107,6 +108,13 @@ test("'vibe rainbow on' without trailing space matches on", () => {
   assert.ok(result);
   assert.equal(result.length, 1);
   assert.equal(result[0].value, "on");
+});
+
+test("'vibe printing ' with trailing space returns on/off", () => {
+  const result = getStickybarArgumentCompletions("vibe printing ");
+  assert.ok(result);
+  assert.equal(result.length, 2);
+  assert.deepEqual(result.map((item) => item.value), ["on", "off"]);
 });
 
 test("'vibe mode ' with trailing space returns generate/file", () => {

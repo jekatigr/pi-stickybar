@@ -11,7 +11,7 @@ Input bar extension for [pi](https://github.com/badlogic/pi-mono) coding agent.
 - **Fixed editor** - prompt is always visible
 - **Two configurable status rows** with model, git state and more, check table below
 - **Last-prompt preview** under the input prompt line
-- **Themed working vibes:** generated realtime based on your input or loaded from a local file, with optional rainbow animation.
+- **Themed working vibes:** generated realtime based on your input or loaded from a local file, with optional rainbow animation and character-by-character printing.
 
 ## Installation
 
@@ -69,6 +69,7 @@ Full configuration example:
       "mode": "generate",
       "model": "openai-codex/gpt-5.4-mini",
       "rainbow": true,
+      "printing": true,
       "fallback": "Working",
       "refreshInterval": 30,
       "prompt": "Generate a {theme} loading message for: {task}. {exclude}",
@@ -188,12 +189,13 @@ Manage vibes from pi with `/stickybar vibe`:
 /stickybar vibe pirate        Enable a theme
 /stickybar vibe off           Disable vibes
 /stickybar vibe rainbow on    Enable rainbow animation
+/stickybar vibe printing off  Disable character-by-character printing
 /stickybar vibe mode file     Use ~/.pi/agent/vibes/<theme>.txt
 /stickybar vibe model provider/model
 /stickybar vibe generate evil cat corporation 100
 ```
 
-`generate` mode requests a short message from the configured model while Pi is working. `file` mode rotates through messages in `~/.pi/agent/vibes/<theme>.txt` and does not make a model request.
+`generate` mode requests a short message from the configured model while Pi is working. `file` mode rotates through messages in `~/.pi/agent/vibes/<theme>.txt` and does not make a model request. Refreshed messages print character by character by default; set `vibe.printing` to `false` or run `/stickybar vibe printing off` to show them immediately.
 
 In `generate` mode, the last `lookback` messages (default `30`) are fed back to the model as an exclusion list to reduce repeats, and are persisted per-theme to `~/.pi/agent/vibes/<theme>.history.json` so the exclusion list survives across sessions. Loading/saving this history is fire-and-forget and never blocks the UI. Set `lookback` to `0` to disable both the exclusion list and persistence.
 

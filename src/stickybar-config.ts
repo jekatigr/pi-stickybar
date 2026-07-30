@@ -18,6 +18,7 @@ const DEFAULT_VIBE: VibeSettings = {
   mode: "generate",
   model: "openai-codex/gpt-5.4-mini",
   rainbow: false,
+  printing: true,
   fallback: "Working",
   refreshInterval: 30,
   prompt: "Generate a 2-4 word {theme} themed loading message ending in ... for: {task}. Capitalize only the first letter, avoid PascalCase or Title Case. {exclude} Output only the message.",
@@ -147,6 +148,7 @@ function parseVibe(value: unknown): VibeSettings {
     mode: value.mode === "file" ? "file" : "generate",
     model: typeof value.model === "string" && value.model.includes("/") ? value.model : DEFAULT_VIBE.model,
     rainbow: value.rainbow === true,
+    printing: value.printing !== false,
     fallback: typeof value.fallback === "string" && value.fallback.trim() ? value.fallback.trim() : DEFAULT_VIBE.fallback,
     refreshInterval: typeof value.refreshInterval === "number" && Number.isFinite(value.refreshInterval)
       ? Math.max(0, Math.floor(value.refreshInterval)) : DEFAULT_VIBE.refreshInterval,

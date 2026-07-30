@@ -9,14 +9,15 @@ interface Hint extends AutocompleteItem {
 const VIBE_ACTIONS: Hint[] = [
   { value: "off", label: "off", description: "Disable themed working messages" },
   { value: "rainbow", label: "rainbow", description: "Toggle or set rainbow animation" },
+  { value: "printing", label: "printing", description: "Toggle or set character-by-character message reveal" },
   { value: "mode", label: "mode", description: "Choose generated or file-backed messages" },
   { value: "model", label: "model", description: "Set the model used to generate messages" },
   { value: "generate", label: "generate", description: "Create a reusable vibe file for a theme" },
 ];
 
-const RAINBOW_VALUES: Hint[] = [
-  { value: "on", label: "on", description: "Enable rainbow animation" },
-  { value: "off", label: "off", description: "Disable rainbow animation" },
+const TOGGLE_VALUES: Hint[] = [
+  { value: "on", label: "on", description: "Enable this effect" },
+  { value: "off", label: "off", description: "Disable this effect" },
 ];
 
 const MODE_VALUES: Hint[] = [
@@ -50,7 +51,7 @@ export function getStickybarArgumentCompletions(prefix: string): AutocompleteIte
   }
 
   const valuePrefix = trailingSpace && words.length === 2 ? "" : words[2] ?? "";
-  if (action === "rainbow") return matching(RAINBOW_VALUES, valuePrefix);
+  if (action === "rainbow" || action === "printing") return matching(TOGGLE_VALUES, valuePrefix);
   if (action === "mode") return matching(MODE_VALUES, valuePrefix);
   if (action === "model") {
     return [{ value: "provider/model", label: "provider/model", description: "Provider and model ID" }];

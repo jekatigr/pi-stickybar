@@ -56,6 +56,7 @@ export interface VibeSettings {
   mode: "generate" | "file";
   model: string;
   rainbow: boolean;
+  printing: boolean;
   fallback: string;
   refreshInterval: number;
   prompt: string;
