@@ -77,6 +77,170 @@ test("scrolling a long transcript does not re-render the full underlying content
   compositor.dispose();
 });
 
+test("a burst of wheel-scroll packets in one input chunk repaints once, not once per packet", () => {
+  const transcript = Array.from({ length: 5000 }, (_, i) => `line ${i}`);
+  const { tui, terminal } = makeTui(transcript);
+
+  let writeCount = 0;
+  const originalWrite = terminal.write.bind(terminal);
+  terminal.write = (data: string) => {
+    writeCount++;
+    originalWrite(data);
+  };
+
+  const compositor = new TerminalSplitCompositor({
+    tui,
+    terminal,
+    renderCluster: () => ({ lines: ["editor"], cursor: null }),
+  });
+
+  compositor.install();
+  tui.render(terminal.columns);
+  writeCount = 0;
+
+  // Five wheel-up packets arriving in a single input chunk, as a fast trackpad
+  // flick typically delivers.
+  (compositor as any).handleInput(scrollWheelUp().repeat(5));
+
+  assert.equal(writeCount, 1, "a batch of scroll packets in one chunk should trigger exactly one repaint");
+
+  compositor.dispose();
+});
+
+test("ctrl+alt+up/ctrl+alt+down jump the viewport using getMessageBoundaries", () => {
+  const transcript = Array.from({ length: 5000 }, (_, i) => `line ${i}`);
+  const { tui, terminal } = makeTui(transcript);
+
+  const boundaryCalls: number[] = [];
+  const compositor = new TerminalSplitCompositor({
+    tui,
+    terminal,
+    renderCluster: () => ({ lines: ["editor"], cursor: null }),
+    getMessageBoundaries: (width) => {
+      boundaryCalls.push(width);
+      return [10, 4000, 4990];
+    },
+  });
+
+  compositor.install();
+  tui.render(terminal.columns); // populates visibleRootStart (4977 for a 23-row viewport)
+
+  // ctrl+alt+up (xterm modified-arrow sequence)
+  (compositor as any).handleInput("\x1b[1;7A");
+  assert.equal((compositor as any).scrollOffset, 977, "should jump so boundary line 4000 is at the top of the viewport");
+  assert.deepEqual(boundaryCalls, [terminal.columns], "getMessageBoundaries should be called with the current terminal width");
+
+  tui.render(terminal.columns); // refresh visibleRootStart to reflect the jump above
+
+  // ctrl+alt+down
+  (compositor as any).handleInput("\x1b[1;7B");
+  assert.equal((compositor as any).scrollOffset, 0, "jumping forward past the last boundary should land back at the bottom");
+
+  compositor.dispose();
+});
+
+test("rapid repeated message-navigation keys use the updated viewport", () => {
+  const transcript = Array.from({ length: 5000 }, (_, i) => `line ${i}`);
+  const { tui, terminal } = makeTui(transcript);
+  const compositor = new TerminalSplitCompositor({
+    tui,
+    terminal,
+    renderCluster: () => ({ lines: ["editor"], cursor: null }),
+    getMessageBoundaries: () => [10, 4000, 4990],
+  });
+
+  compositor.install();
+  tui.render(terminal.columns); // initial viewport starts at 4977
+
+  (compositor as any).handleInput("\x1b[1;7A"); // jump to 4000
+  (compositor as any).handleInput("\x1b[1;7A"); // immediately jump to 10, without waiting for a render
+
+  assert.equal((compositor as any).scrollOffset, 4967);
+  assert.equal((compositor as any).visibleRootStart, 10);
+
+  compositor.dispose();
+});
+
+test("ctrl+alt+down past the last message boundary falls back to the end of the thread", () => {
+  const transcript = Array.from({ length: 5000 }, (_, i) => `line ${i}`);
+  const { tui, terminal } = makeTui(transcript);
+
+  // Only earlier boundaries exist relative to where we'll be after the first jump,
+  // so the second ctrl+alt+down has no "next" target to jump to.
+  const compositor = new TerminalSplitCompositor({
+    tui,
+    terminal,
+    renderCluster: () => ({ lines: ["editor"], cursor: null }),
+    getMessageBoundaries: () => [10, 4000],
+  });
+
+  compositor.install();
+  tui.render(terminal.columns); // visibleRootStart = 4977
+
+  (compositor as any).handleInput("\x1b[1;7A"); // ctrl+alt+up -> lands on boundary 4000 (offset 977)
+  assert.equal((compositor as any).scrollOffset, 977);
+  tui.render(terminal.columns); // refresh visibleRootStart to 4000
+
+  (compositor as any).handleInput("\x1b[1;7B"); // ctrl+alt+down -> no boundary after 4000, so jump to the end
+  assert.equal((compositor as any).scrollOffset, 0, "should fall back to the bottom of the thread when no next message boundary exists");
+
+  compositor.dispose();
+});
+
+test("ctrl+alt+up before the first message boundary falls back to the start of the thread", () => {
+  const transcript = Array.from({ length: 5000 }, (_, i) => `line ${i}`);
+  const { tui, terminal } = makeTui(transcript);
+
+  // Only a boundary after the current viewport exists, so ctrl+alt+up has no "previous" target.
+  const compositor = new TerminalSplitCompositor({
+    tui,
+    terminal,
+    renderCluster: () => ({ lines: ["editor"], cursor: null }),
+    getMessageBoundaries: () => [4990],
+  });
+
+  compositor.install();
+  tui.render(terminal.columns); // visibleRootStart = 4977, scrollOffset starts at 0
+
+  (compositor as any).handleInput("\x1b[1;7A"); // ctrl+alt+up -> no boundary before 4977, so jump to the start
+  assert.equal((compositor as any).scrollOffset, (compositor as any).maxScrollOffset, "should fall back to the top of the thread when no previous message boundary exists");
+
+  compositor.dispose();
+});
+
+test("a custom or disabled previousMessageKey/nextMessageKey overrides the ctrl+alt+up/ctrl+alt+down default", () => {
+  const transcript = Array.from({ length: 5000 }, (_, i) => `line ${i}`);
+  const { tui, terminal } = makeTui(transcript);
+
+  const compositor = new TerminalSplitCompositor({
+    tui,
+    terminal,
+    renderCluster: () => ({ lines: ["editor"], cursor: null }),
+    getMessageBoundaries: () => [4000],
+    previousMessageKey: "ctrl+t",
+    nextMessageKey: null, // disabled
+  });
+
+  compositor.install();
+  tui.render(terminal.columns); // visibleRootStart = 4977
+
+  // The default ctrl+alt+up should no longer jump to a message boundary...
+  (compositor as any).handleInput("\x1b[1;7A");
+  assert.equal((compositor as any).scrollOffset, 0, "the default key should be inactive once a custom previousMessageKey is set");
+
+  // ...but the configured ctrl+t should.
+  (compositor as any).handleInput("\x14"); // ctrl+t (raw control character)
+  assert.equal((compositor as any).scrollOffset, 977, "the configured previousMessageKey should jump to the message boundary");
+
+  // nextMessageKey is disabled (null), so ctrl+alt+down should fall through untouched.
+  const beforeDown = (compositor as any).scrollOffset;
+  const result = (compositor as any).handleInput("\x1b[1;7B");
+  assert.equal(result, undefined, "a disabled nextMessageKey should leave the keypress unconsumed");
+  assert.equal((compositor as any).scrollOffset, beforeDown, "a disabled nextMessageKey should not move the viewport");
+
+  compositor.dispose();
+});
+
 test("clicking/selecting in the transcript also reuses cached lines instead of re-rendering", () => {
   const transcript = Array.from({ length: 3000 }, (_, i) => `line ${i}`);
   const { tui, terminal, getFullRenderCalls } = makeTui(transcript);

@@ -1,4 +1,4 @@
-import { deleteAllKittyImages, isKeyRelease, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { deleteAllKittyImages, isKeyRelease, type KeyId, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { FixedEditorClusterRender } from "./cluster.ts";
 
 export interface TerminalLike {
@@ -15,6 +15,12 @@ interface TerminalSplitCompositorOptions {
   getShowHardwareCursor?: () => boolean;
   mouseScroll?: boolean;
   onCopySelection?: (text: string) => void;
+  /** Returns absolute root-line offsets to jump between (e.g. user prompt boundaries). */
+  getMessageBoundaries?: (width: number) => number[];
+  /** Key identifier (per pi-tui's matchesKey) for jumping to the previous user prompt. `null` disables it. Defaults to "ctrl+alt+up". */
+  previousMessageKey?: KeyId | null;
+  /** Key identifier for jumping to the next user prompt. `null` disables it. Defaults to "ctrl+alt+down". */
+  nextMessageKey?: KeyId | null;
 }
 
 interface PatchedRenderable {
@@ -308,6 +314,9 @@ export class TerminalSplitCompositor {
   private readonly getShowHardwareCursor: () => boolean;
   private readonly mouseScroll: boolean;
   private readonly onCopySelection: ((text: string) => void) | null;
+  private readonly getMessageBoundaries: ((width: number) => number[]) | null;
+  private readonly previousMessageKey: KeyId | null;
+  private readonly nextMessageKey: KeyId | null;
   private extendedKeyboardMode: ExtendedKeyboardMode | null = null;
   private readonly rowsDescriptor: PropertyDescriptor | undefined;
   private readonly originalWrite: (data: string) => void;
@@ -351,6 +360,9 @@ export class TerminalSplitCompositor {
     this.getShowHardwareCursor = options.getShowHardwareCursor ?? (() => false);
     this.mouseScroll = options.mouseScroll !== false;
     this.onCopySelection = options.onCopySelection ?? null;
+    this.getMessageBoundaries = options.getMessageBoundaries ?? null;
+    this.previousMessageKey = options.previousMessageKey === undefined ? "ctrl+alt+up" : options.previousMessageKey;
+    this.nextMessageKey = options.nextMessageKey === undefined ? "ctrl+alt+down" : options.nextMessageKey;
     this.rowsDescriptor = descriptorForRows(options.terminal);
     this.originalWrite = options.terminal.write.bind(options.terminal);
     this.originalDoRender = typeof options.tui.doRender === "function" ? options.tui.doRender.bind(options.tui) : null;
@@ -453,12 +465,23 @@ export class TerminalSplitCompositor {
     return this.jumpToRootOffset(this.maxScrollOffset);
   }
 
+  private getMessageBoundariesForCurrentWidth(): number[] {
+    if (!this.getMessageBoundaries) return [];
+    const width = Math.max(1, this.terminal.columns || 80);
+    try {
+      return this.getMessageBoundaries(width);
+    } catch {
+      return [];
+    }
+  }
+
   private jumpToRootOffset(offset: number): boolean {
     if (this.disposed || this.hasVisibleOverlay() || this.scrollOffset === offset) return false;
     this.clearSelection();
     this.lastLeftPress = null;
     this.scrollOffset = offset;
     this.pendingImageCleanup = true;
+    this.updateVisibleRootWindow();
     this.requestRender();
     return true;
   }
@@ -482,6 +505,7 @@ export class TerminalSplitCompositor {
       this.lastLeftPress = null;
       this.scrollOffset = nextOffset;
       this.pendingImageCleanup = true;
+      this.updateVisibleRootWindow();
       this.requestRender();
       return true;
     }
@@ -676,18 +700,33 @@ export class TerminalSplitCompositor {
     const mousePackets = this.mouseScroll ? parseSgrMousePackets(data) : null;
     if (mousePackets) {
       if (overlayVisible) {
-        let handledScroll = false;
-        for (const packet of mousePackets) {
-          if (mouseScrollDelta(packet) !== 0) {
-            this.scrollBy(mouseScrollDelta(packet));
-            handledScroll = true;
-          }
-        }
+        // Coalesce every scroll packet in this batch into a single scrollBy call so a
+        // fast wheel/trackpad burst repaints once instead of once per packet.
+        let scrollDelta = 0;
+        for (const packet of mousePackets) scrollDelta += mouseScrollDelta(packet);
+        if (scrollDelta !== 0) this.scrollBy(scrollDelta);
         // Consume only if we acted on a scroll event; otherwise pass through to the overlay.
-        return handledScroll ? { consume: true } : undefined;
+        return scrollDelta !== 0 ? { consume: true } : undefined;
       }
+      // Sum consecutive scroll packets into one repaint, but keep any click/drag/release
+      // packets interleaved in the same batch handled individually and in order.
+      let pendingScrollDelta = 0;
       for (const packet of mousePackets) {
+        const delta = mouseScrollDelta(packet);
+        if (delta !== 0) {
+          pendingScrollDelta += delta;
+          continue;
+        }
+        if (pendingScrollDelta !== 0) {
+          this.selectionDragging = false;
+          this.scrollBy(pendingScrollDelta);
+          pendingScrollDelta = 0;
+        }
         this.handleMousePacket(packet);
+      }
+      if (pendingScrollDelta !== 0) {
+        this.selectionDragging = false;
+        this.scrollBy(pendingScrollDelta);
       }
       return { consume: true };
     }
@@ -701,6 +740,16 @@ export class TerminalSplitCompositor {
     }
     if (!isKeyRelease(data) && matchesKey(data, "end")) {
       this.jumpToRootBottom();
+      return { consume: true };
+    }
+    if (this.previousMessageKey && !isKeyRelease(data) && matchesKey(data, this.previousMessageKey)) {
+      // Once there's no earlier user prompt left, land on the very start of the thread.
+      if (!this.jumpToPreviousRootTarget(this.getMessageBoundariesForCurrentWidth())) this.jumpToRootTop();
+      return { consume: true };
+    }
+    if (this.nextMessageKey && !isKeyRelease(data) && matchesKey(data, this.nextMessageKey)) {
+      // Once there's no later user prompt left, land on the very end of the thread.
+      if (!this.jumpToNextRootTarget(this.getMessageBoundariesForCurrentWidth())) this.jumpToRootBottom();
       return { consume: true };
     }
 

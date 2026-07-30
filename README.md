@@ -74,6 +74,11 @@ Full configuration example:
       "prompt": "Generate a {theme} loading message for: {task}. {exclude}",
       "maxLength": 65,
       "lookback": 30
+    },
+
+    "chatNavigation": {
+      "previousKey": "ctrl+alt+up",
+      "nextKey": "ctrl+alt+down"
     }
   }
 }
@@ -151,6 +156,27 @@ Extensions publish a value with:
 ```ts
 ctx.ui.setStatus("ci-status", "passing");
 ```
+
+### Chat navigation (fixed editor only)
+
+When `fixedEditor` is on, `chatNavigation.previousKey`/`nextKey` jump the scrollable transcript to the previous/next user prompt (a single agent turn can render several assistant/tool-call components in a row, so only user prompts are used as jump targets - assistant replies are skipped). Defaults are `ctrl+alt+up` / `ctrl+alt+down`, which avoid Pi's existing `ctrl+o` and `ctrl+p` bindings. Once there's no earlier/later prompt left, the shortcut lands on the very start/end of the thread instead of doing nothing.
+
+Some terminals and IDE-embedded terminals (e.g. IntelliJ's terminal tool window) reserve modified arrow keys for their own scrollback or do not forward them to Pi. If a shortcut appears to "just scroll" instead of jumping to a message, override it with another key combination in `chatNavigation`.
+
+If the defaults collide with something in your setup, override them:
+
+```json
+{
+  "stickybar": {
+    "chatNavigation": {
+      "previousKey": "ctrl+alt+t",
+      "nextKey": "ctrl+alt+y"
+    }
+  }
+}
+```
+
+Avoid `ctrl+[` (identical to plain `Escape` on every ANSI terminal - Pi uses `Escape` to cancel/close overlays) and `ctrl+]` (already bound by Pi's editor to "jump forward to character"). Set a key to `null` or `""` to disable it entirely.
 
 ### Working vibes
 

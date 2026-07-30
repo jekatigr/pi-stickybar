@@ -1,4 +1,4 @@
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { visibleWidth, type KeyId } from "@earendil-works/pi-tui";
 import type {
   BuiltinStatusLineSegmentId,
   CustomStatusItem,
@@ -25,6 +25,15 @@ const DEFAULT_VIBE: VibeSettings = {
   lookback: 30,
 };
 
+const DEFAULT_CHAT_NAVIGATION: StickybarConfig["chatNavigation"] = { previousKey: "ctrl+alt+up", nextKey: "ctrl+alt+down" };
+const NAVIGATION_KEY_BASES = new Set([
+  ..."abcdefghijklmnopqrstuvwxyz0123456789",
+  "`", "-", "=", "[", "]", "\\", ";", "'", ",", ".", "/", "!", "@", "#", "$", "%", "^", "&", "*", "(", ")", "_", "+", "|", "~", "{", "}", ":", "<", ">", "?",
+  "escape", "esc", "enter", "return", "tab", "space", "backspace", "delete", "insert", "clear", "home", "end", "pageup", "pagedown", "up", "down", "left", "right",
+  ...Array.from({ length: 12 }, (_, index) => `f${index + 1}`),
+]);
+const NAVIGATION_KEY_MODIFIERS = new Set(["ctrl", "shift", "alt", "super"]);
+
 export const DEFAULT_STICKYBAR_CONFIG: StickybarConfig = {
   fixedEditor: true,
   mouseScroll: true,
@@ -38,6 +47,7 @@ export const DEFAULT_STICKYBAR_CONFIG: StickybarConfig = {
   },
   customItems: [],
   vibe: DEFAULT_VIBE,
+  chatNavigation: DEFAULT_CHAT_NAVIGATION,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -148,6 +158,31 @@ function parseVibe(value: unknown): VibeSettings {
   };
 }
 
+function parseChatNavigationKey(value: unknown, fallback: KeyId | null): KeyId | null {
+  if (value === null || value === "") return null;
+  if (typeof value !== "string") return fallback;
+
+  let key = value.trim().toLowerCase();
+  if (!key) return null;
+  const modifiers = new Set<string>();
+  while (true) {
+    const match = /^(ctrl|shift|alt|super)\+/.exec(key);
+    if (!match) break;
+    if (modifiers.has(match[1])) return fallback;
+    modifiers.add(match[1]);
+    key = key.slice(match[0].length);
+  }
+  return NAVIGATION_KEY_BASES.has(key) ? value.trim() as KeyId : fallback;
+}
+
+function parseChatNavigation(value: unknown): StickybarConfig["chatNavigation"] {
+  if (!isRecord(value)) return { ...DEFAULT_CHAT_NAVIGATION };
+  return {
+    previousKey: parseChatNavigationKey(value.previousKey, DEFAULT_CHAT_NAVIGATION.previousKey),
+    nextKey: parseChatNavigationKey(value.nextKey, DEFAULT_CHAT_NAVIGATION.nextKey),
+  };
+}
+
 /** Reads only the canonical `stickybar` object. Legacy shapes intentionally fall back to defaults. */
 export function parseStickybarConfig(value: unknown): StickybarConfig {
   if (!isRecord(value)) return structuredClone(DEFAULT_STICKYBAR_CONFIG);
@@ -166,6 +201,7 @@ export function parseStickybarConfig(value: unknown): StickybarConfig {
     options: mergeSegmentOptions(DEFAULT_STICKYBAR_CONFIG.options, parseOptions(value.options)),
     customItems,
     vibe: parseVibe(value.vibe),
+    chatNavigation: parseChatNavigation(value.chatNavigation),
   };
 }
 

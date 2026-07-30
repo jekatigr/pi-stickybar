@@ -7,6 +7,7 @@ import { join } from "node:path";
 
 import { readCoreContextUsage } from "./context-usage.ts";
 import { renderFixedEditorCluster } from "./fixed-editor/cluster.ts";
+import { collectMessageBoundaries } from "./fixed-editor/message-boundaries.ts";
 import { emergencyTerminalModeReset, TerminalSplitCompositor } from "./fixed-editor/terminal-split.ts";
 import { getGitStatus, invalidateGitBranch, invalidateGitStatus, onGitStatusChange } from "./git-status.ts";
 import {
@@ -230,6 +231,12 @@ export default function stickybar(pi: ExtensionAPI) {
     const statusContainer = children[match.index - 2];
     const above = children[match.index - 1];
     const below = children[match.index + 1];
+    // The chat transcript container sits 4 slots before the editor in Pi's widget
+    // tree (header, loaded-resources, chat, pending-messages, status, above, editor).
+    // Used on demand by the configured navigation keys to locate user prompt boundaries.
+    const chatContainerIndex = match.index - 4;
+    const chatContainer = children[chatContainerIndex];
+    const precedingContainers = children.slice(0, Math.max(0, chatContainerIndex));
     const fallbackTheme = ctx.ui.theme;
     let instance: TerminalSplitCompositor;
     instance = new TerminalSplitCompositor({
@@ -238,6 +245,9 @@ export default function stickybar(pi: ExtensionAPI) {
       mouseScroll: config.mouseScroll,
       onCopySelection: copyToClipboard,
       getShowHardwareCursor: () => tui.getShowHardwareCursor?.() ?? false,
+      getMessageBoundaries: (width) => collectMessageBoundaries(precedingContainers, chatContainer, width),
+      previousMessageKey: config.chatNavigation.previousKey,
+      nextMessageKey: config.chatNavigation.nextKey,
       renderCluster: (width, rows) => {
         const theme = currentCtx?.ui?.theme ?? fallbackTheme;
         const nativeStatusLines = statusContainer?.render ? instance.renderHidden(statusContainer, width) : [];

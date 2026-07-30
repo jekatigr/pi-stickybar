@@ -1,4 +1,5 @@
 import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
+import type { KeyId } from "@earendil-works/pi-tui";
 
 export type ThemeLike = Pick<Theme, "fg">;
 
@@ -79,6 +80,8 @@ export interface StickybarConfig {
   options: StatusLineSegmentOptions;
   customItems: CustomStatusItem[];
   vibe: VibeSettings;
+  /** Fixed-editor chat message navigation shortcuts. Set a key to null/"" to disable it. */
+  chatNavigation: { previousKey: KeyId | null; nextKey: KeyId | null };
 }
 
 export interface GitStatus {

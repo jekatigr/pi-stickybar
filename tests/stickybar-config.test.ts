@@ -10,6 +10,25 @@ test("stickybar defaults to the single built-in layout", () => {
   assert.equal(config.mouseScroll, true);
   assert.equal(config.vibe.theme, null);
   assert.equal(config.vibe.lookback, 30);
+  assert.deepEqual(config.chatNavigation, { previousKey: "ctrl+alt+up", nextKey: "ctrl+alt+down" });
+});
+
+test("chatNavigation keys can be customized or disabled", () => {
+  const custom = parseStickybarConfig({ chatNavigation: { previousKey: "alt+p", nextKey: "alt+n" } });
+  assert.deepEqual(custom.chatNavigation, { previousKey: "alt+p", nextKey: "alt+n" });
+
+  const disabledViaNull = parseStickybarConfig({ chatNavigation: { previousKey: null, nextKey: null } });
+  assert.deepEqual(disabledViaNull.chatNavigation, { previousKey: null, nextKey: null });
+
+  const disabledViaEmptyString = parseStickybarConfig({ chatNavigation: { previousKey: "", nextKey: "" } });
+  assert.deepEqual(disabledViaEmptyString.chatNavigation, { previousKey: null, nextKey: null });
+
+  // Invalid types and malformed key identifiers fall back to defaults instead of silently disabling navigation.
+  const invalid = parseStickybarConfig({ chatNavigation: { previousKey: 42, nextKey: [] } });
+  assert.deepEqual(invalid.chatNavigation, { previousKey: "ctrl+alt+up", nextKey: "ctrl+alt+down" });
+
+  const malformed = parseStickybarConfig({ chatNavigation: { previousKey: "ctrl+not-a-key", nextKey: "ctrl+ctrl+p" } });
+  assert.deepEqual(malformed.chatNavigation, { previousKey: "ctrl+alt+up", nextKey: "ctrl+alt+down" });
 });
 
 test("custom items are placed directly in the configured line order", () => {
