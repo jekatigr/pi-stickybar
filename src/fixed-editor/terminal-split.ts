@@ -243,6 +243,18 @@ function compareSelectionPoints(a: SelectionPoint, b: SelectionPoint): number {
   return a.line === b.line ? a.col - b.col : a.line - b.line;
 }
 
+function bindPrototypeMethod<T extends object, K extends string>(target: T, name: K): ((...args: any[]) => any) | null {
+  let current: object | null = target;
+  while (current) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, name);
+    if (descriptor && typeof descriptor.value === "function") {
+      return descriptor.value.bind(target);
+    }
+    current = Object.getPrototypeOf(current);
+  }
+  return null;
+}
+
 function descriptorForRows(terminal: TerminalLike): PropertyDescriptor | undefined {
   let target: object | null = terminal;
   while (target) {
@@ -365,8 +377,12 @@ export class TerminalSplitCompositor {
     this.nextMessageKey = options.nextMessageKey === undefined ? "ctrl+alt+down" : options.nextMessageKey;
     this.rowsDescriptor = descriptorForRows(options.terminal);
     this.originalWrite = options.terminal.write.bind(options.terminal);
-    this.originalDoRender = typeof options.tui.doRender === "function" ? options.tui.doRender.bind(options.tui) : null;
-    this.originalRender = typeof options.tui.render === "function" ? options.tui.render.bind(options.tui) : null;
+    // ctx.ui is a stable Proxy in newer Pi releases. Capturing
+    // `options.tui.doRender.bind(options.tui)` would capture the proxy
+    // forwarding function; after we patch doRender it forwards back to our
+    // patch forever. Capture the prototype implementations instead.
+    this.originalDoRender = bindPrototypeMethod(options.tui, "doRender");
+    this.originalRender = bindPrototypeMethod(options.tui, "render");
   }
 
   install(): void {
@@ -417,8 +433,9 @@ export class TerminalSplitCompositor {
         }
       };
     }
-    if (typeof this.tui.compositeLineAt === "function") {
-      this.originalCompositeLineAt = this.tui.compositeLineAt.bind(this.tui) as CompositeLineAt;
+    const originalCompositeLineAt = bindPrototypeMethod(this.tui, "compositeLineAt");
+    if (originalCompositeLineAt) {
+      this.originalCompositeLineAt = originalCompositeLineAt as CompositeLineAt;
       this.tui.compositeLineAt = (
         baseLine: string,
         overlayLine: string,

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AssistantMessageComponent, UserMessageComponent } from "@earendil-works/pi-coding-agent";
-import { collectMessageBoundaries } from "../src/fixed-editor/message-boundaries.ts";
+import { collectMessageBoundaries, locateMessageContainer } from "../src/fixed-editor/message-boundaries.ts";
 
 // Builds an object that passes `instanceof <ComponentClass>` (so the boundary
 // detection matches Pi's real message components) without invoking the real
@@ -11,6 +11,22 @@ function fakeComponent(prototype: object, lines: string[]) {
   component.render = () => lines;
   return component;
 }
+
+test("locateMessageContainer supports Pi root-mounted and document-mounted transcript layouts", () => {
+  const user = fakeComponent(UserMessageComponent.prototype, ["> hello"]);
+  const chat = { children: [user] };
+  const header = { render: () => ["header"] };
+  const resources = { render: () => [] };
+
+  assert.deepEqual(locateMessageContainer([header, resources, chat]), {
+    precedingContainers: [header, resources],
+    chatContainer: chat,
+  });
+  assert.deepEqual(locateMessageContainer([{ children: [header, resources, chat] }]), {
+    precedingContainers: [header, resources],
+    chatContainer: chat,
+  });
+});
 
 test("collectMessageBoundaries offsets by preceding containers and records only user prompt starts", () => {
   const preceding = [

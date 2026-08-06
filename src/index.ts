@@ -7,7 +7,7 @@ import { join } from "node:path";
 
 import { readCoreContextUsage } from "./context-usage.ts";
 import { renderFixedEditorCluster } from "./fixed-editor/cluster.ts";
-import { collectMessageBoundaries } from "./fixed-editor/message-boundaries.ts";
+import { collectMessageBoundaries, locateMessageContainer } from "./fixed-editor/message-boundaries.ts";
 import { emergencyTerminalModeReset, TerminalSplitCompositor } from "./fixed-editor/terminal-split.ts";
 import { getGitStatus, invalidateGitBranch, invalidateGitStatus, onGitStatusChange } from "./git-status.ts";
 import {
@@ -95,7 +95,16 @@ export default function stickybar(pi: ExtensionAPI) {
   let removeGitStatusListener: (() => void) | null = null;
   let cachedLayout: { width: number; at: number; value: { top: string; bottom: string } } | null = null;
 
-  const scheduler = createRenderScheduler(() => tui?.requestRender(), STATUS_RENDER_DEBOUNCE_MS);
+  const scheduler = createRenderScheduler(() => {
+    try {
+      tui?.requestRender();
+    } catch (error) {
+      // Do not let a late render failure take down Pi after startup. The
+      // compositor can be removed safely and Pi will retain its native UI.
+      console.debug("[stickybar] Render failed; disabling fixed editor:", error);
+      disposeCompositor(true);
+    }
+  }, STATUS_RENDER_DEBOUNCE_MS);
   const invalidate = (immediate = false) => {
     cachedLayout = null;
     if (immediate) scheduler.schedule(0);
@@ -221,22 +230,20 @@ export default function stickybar(pi: ExtensionAPI) {
     return index < 0 ? null : { container: children[index], index };
   }
 
-  function installCompositor(ctx: any): void {
+  function installCompositor(ctx: any): boolean {
     disposeCompositor();
-    if (!config.fixedEditor || !ctx.hasUI || !editor || !tui?.terminal) return;
+    // Pi 0.84's fullscreen renderer already owns a sticky editor/footer and an
+    // independently scrolling transcript. Do not install the regular-mode
+    // terminal compositor on top of it.
+    if (ctx.ui?.mode === "fullscreen") return false;
+    if (!config.fixedEditor || !ctx.hasUI || !editor || !tui?.terminal) return false;
     const match = parentOf(editor);
-    if (!match) return;
+    if (!match) return false;
     const children = tui.children as any[];
     const editorContainer = match.container;
     const statusContainer = children[match.index - 2];
     const above = children[match.index - 1];
     const below = children[match.index + 1];
-    // The chat transcript container sits 4 slots before the editor in Pi's widget
-    // tree (header, loaded-resources, chat, pending-messages, status, above, editor).
-    // Used on demand by the configured navigation keys to locate user prompt boundaries.
-    const chatContainerIndex = match.index - 4;
-    const chatContainer = children[chatContainerIndex];
-    const precedingContainers = children.slice(0, Math.max(0, chatContainerIndex));
     const fallbackTheme = ctx.ui.theme;
     let instance: TerminalSplitCompositor;
     instance = new TerminalSplitCompositor({
@@ -245,7 +252,12 @@ export default function stickybar(pi: ExtensionAPI) {
       mouseScroll: config.mouseScroll,
       onCopySelection: copyToClipboard,
       getShowHardwareCursor: () => tui.getShowHardwareCursor?.() ?? false,
-      getMessageBoundaries: (width) => collectMessageBoundaries(precedingContainers, chatContainer, width),
+      getMessageBoundaries: (width) => {
+        const location = locateMessageContainer(Array.isArray(tui?.children) ? tui.children : []);
+        return location
+          ? collectMessageBoundaries(location.precedingContainers, location.chatContainer, width)
+          : [];
+      },
       previousMessageKey: config.chatNavigation.previousKey,
       nextMessageKey: config.chatNavigation.nextKey,
       renderCluster: (width, rows) => {
@@ -275,8 +287,18 @@ export default function stickybar(pi: ExtensionAPI) {
     if (above?.render) instance.hideRenderable(above);
     instance.hideRenderable(editorContainer);
     if (below?.render) instance.hideRenderable(below);
-    instance.install();
-    tui.requestRender(true);
+    try {
+      instance.install();
+      tui.requestRender(true);
+      return true;
+    } catch (error) {
+      // A Pi/TUI internal layout change should never make Pi itself fail to
+      // start. Restore the terminal and fall back to ordinary widgets.
+      compositor = instance;
+      disposeCompositor(true);
+      console.debug("[stickybar] Fixed editor unavailable; using widgets instead:", error);
+      return false;
+    }
   }
 
   function installWidgets(ctx: any): void {
@@ -326,6 +348,7 @@ export default function stickybar(pi: ExtensionAPI) {
       return next;
     };
     ctx.ui.setEditorComponent(factory);
+    const fullscreen = ctx.ui?.mode === "fullscreen";
     ctx.ui.setFooter((footerTui: any, _theme: Theme, data: ReadonlyFooterDataProvider) => {
       footerData = data;
       tui = footerTui;
@@ -333,8 +356,21 @@ export default function stickybar(pi: ExtensionAPI) {
       const unsubscribe = data.onBranchChange(() => invalidate(true));
       return { render: () => [], invalidate, dispose: () => { unsubscribe(); footerRestore?.(); footerRestore = null; } };
     });
-    if (config.fixedEditor) installCompositor(ctx);
-    else installWidgets(ctx);
+    // Fullscreen Pi already owns the terminal compositor. Keep Stickybar's
+    // status rows as widgets there, but never patch the fullscreen renderer.
+    const compositorInstalled = config.fixedEditor && !fullscreen ? installCompositor(ctx) : false;
+    if (!compositorInstalled) installWidgets(ctx);
+  }
+
+  function recoverUiAfterSetupFailure(ctx: any, error: unknown): void {
+    console.debug("[stickybar] UI setup failed; restoring Pi's native UI:", error);
+    try { disposeCompositor(true); } catch (resetError) { console.debug("[stickybar] Terminal reset failed:", resetError); }
+    try { ctx.ui.setEditorComponent(undefined); } catch (restoreError) { console.debug("[stickybar] Editor restore failed:", restoreError); }
+    try { ctx.ui.setFooter(undefined); } catch (restoreError) { console.debug("[stickybar] Footer restore failed:", restoreError); }
+    footerData = null;
+    tui = null;
+    editor = null;
+    try { installWidgets(ctx); } catch (widgetError) { console.debug("[stickybar] Widget fallback failed:", widgetError); }
   }
 
   function persistVibe(ctx: any): void {
@@ -400,7 +436,10 @@ export default function stickybar(pi: ExtensionAPI) {
     thinkingLevel = pi.getThinkingLevel();
     activeModel = ctx.model ?? null;
     initVibeManager(ctx, config.vibe);
-    if (ctx.hasUI) setupUi(ctx);
+    if (ctx.hasUI) {
+      try { setupUi(ctx); }
+      catch (error) { recoverUiAfterSetupFailure(ctx, error); }
+    }
     invalidate(true);
   });
 

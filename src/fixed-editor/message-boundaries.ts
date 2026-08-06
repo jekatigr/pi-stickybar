@@ -4,6 +4,11 @@ interface Renderable {
   render(width: number): string[];
 }
 
+export interface MessageContainerLocation {
+  precedingContainers: unknown[];
+  chatContainer: unknown;
+}
+
 function isRenderable(value: unknown): value is Renderable {
   return Boolean(value) && typeof (value as { render?: unknown }).render === "function";
 }
@@ -16,6 +21,38 @@ function renderableLineCount(component: unknown, width: number): number {
     // A malformed/incompatible component should not break navigation.
     return 0;
   }
+}
+
+/**
+ * Finds Pi's message container and the renderable siblings that precede it.
+ *
+ * Pi 0.80 mounted header/resources/chat as separate root children, while newer
+ * releases mount them below a single document container. Discover the path from
+ * the component tree instead of relying on root-child indexes.
+ */
+export function locateMessageContainer(rootChildren: readonly unknown[]): MessageContainerLocation | null {
+  function visit(container: unknown, preceding: unknown[]): MessageContainerLocation | null {
+    const children = (container as { children?: unknown[] } | null)?.children;
+    if (!Array.isArray(children)) return null;
+
+    if (children.some((child) => child instanceof UserMessageComponent || child instanceof AssistantMessageComponent)) {
+      return { precedingContainers: preceding, chatContainer: container };
+    }
+
+    for (let index = 0; index < children.length; index++) {
+      const child = children[index];
+      if (!Array.isArray((child as { children?: unknown[] } | null)?.children)) continue;
+      const found = visit(child, [...preceding, ...children.slice(0, index)]);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  for (let index = 0; index < rootChildren.length; index++) {
+    const found = visit(rootChildren[index], rootChildren.slice(0, index));
+    if (found) return found;
+  }
+  return null;
 }
 
 /**
