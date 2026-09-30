@@ -158,14 +158,13 @@ StickyBar does not implement a transcript viewport, mouse selection, or clipboar
 ```json
 {
   "tuiMode": "fullscreen",
-  "fullscreenCopyOnSelect": false,
   "stickybar": {
     "showLastPrompt": true
   }
 }
 ```
 
-`fullscreenCopyOnSelect` is a Pi setting. It is set to `false` above so Pi keeps the selection active and handles copying through its native keybinding rather than automatically writing to the clipboard. Set it to `true` if you prefer Pi's automatic copy-on-selection behavior.
+Selection and clipboard behavior, including Pi's `fullscreenCopyOnSelect` setting and native copy keybinding, are managed only by Pi. StickyBar does not read, override, or document a preferred copy policy.
 
 In Pi's regular mode, StickyBar renders its status widgets only; normal terminal scrollback and selection remain in control.
 
