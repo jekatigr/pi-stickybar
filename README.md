@@ -21,6 +21,33 @@ pi install npm:pi-stickybar
 
 Restart pi after installation or call `/reload`.
 
+## Migrating to 3.0
+
+StickyBar 3.0 removes its custom fixed-editor/transcript compositor. It no longer implements transcript scrolling, message navigation, mouse text selection, or clipboard copying. Pi owns those behaviors instead.
+
+To retain a fixed editor and independently scrollable transcript, enable Pi's native fullscreen UI:
+
+```json
+{
+  "tuiMode": "fullscreen"
+}
+```
+
+Remove these obsolete `stickybar` settings from existing configuration files; they are ignored by 3.0:
+
+```json
+{
+  "fixedEditor": true,
+  "mouseScroll": true,
+  "chatNavigation": {
+    "previousKey": "ctrl+alt+up",
+    "nextKey": "ctrl+alt+down"
+  }
+}
+```
+
+For fullscreen selections that should not copy terminal soft wraps as hard newlines, Pi does not yet expose source-wrap metadata. Install the optional [`pi-copy-soft-wrap`](https://pi.dev/packages/pi-copy-soft-wrap) Pi package; it normalizes copied fullscreen selections conservatively.
+
 ## Configuration
 
 The extension has opiniated defaults, but it also configurable via `settings.json`

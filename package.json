@@ -1,7 +1,7 @@
 {
   "name": "pi-stickybar",
-  "version": "2.0.1",
-  "description": "Configurable two-line status bar and fixed editor extension for pi coding agent",
+  "version": "3.0.0",
+  "description": "Configurable two-line status bar for pi coding agent",
   "repository": {
     "type": "git",
     "url": "https://github.com/jekatigr/pi-stickybar"
