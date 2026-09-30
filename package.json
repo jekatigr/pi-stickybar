@@ -1,6 +1,6 @@
 {
   "name": "pi-stickybar",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Configurable two-line status bar for pi coding agent",
   "repository": {
     "type": "git",

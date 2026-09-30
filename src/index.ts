@@ -209,7 +209,10 @@ export default function stickybar(pi: ExtensionAPI) {
     ctx.ui.setWidget("stickybar-bottom", undefined);
     ctx.ui.setWidget("stickybar-last-prompt", undefined);
     const factory = (editorTui: any, theme: any, keybindings: any) => {
-      const next = new CustomEditor(editorTui, theme, keybindings);
+      // Keep Pi's native working indicator in the editor border. Without this,
+      // Pi places vibes in its separate status container, leaving a blank row
+      // between the StickyBar widget and the working message.
+      const next = new CustomEditor(editorTui, theme, keybindings, { embedWorkingStatus: true } as any);
       let submit: unknown;
       Object.defineProperty(next, "onSubmit", {
         configurable: true,
