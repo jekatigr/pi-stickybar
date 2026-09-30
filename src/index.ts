@@ -20,6 +20,7 @@ import { createRenderScheduler } from "./render-scheduler.ts";
 import { getStickybarArgumentCompletions } from "./stickybar-completions.ts";
 import { readStickybarSettings, writeStickybarConfig } from "./settings.ts";
 import { renderStatusLayout } from "./status-layout.ts";
+import { droppedPathTextFromInput, replaceDroppedPathInput } from "./editor-drops.ts";
 import type { SegmentContext, StickybarConfig } from "./types.ts";
 import {
   generateVibesBatch,
@@ -327,6 +328,11 @@ export default function stickybar(pi: ExtensionAPI) {
       });
       const originalHandleInput = next.handleInput.bind(next);
       next.handleInput = (data: string) => {
+        // Finder and some terminal emulators paste file drops as a file:// URI
+        // list. Convert only an all-URI drop; ordinary text/paste remains Pi's
+        // responsibility.
+        const droppedPaths = droppedPathTextFromInput(data);
+        if (droppedPaths !== null) data = replaceDroppedPathInput(data, droppedPaths);
         const before = next.getExpandedText();
         originalHandleInput(data);
         const isHistoryKey = keybindings.matches(data, "tui.editor.cursorUp") || keybindings.matches(data, "tui.editor.cursorDown");

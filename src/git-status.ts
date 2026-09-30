@@ -77,6 +77,11 @@ function runGit(args: string[], timeoutMs = 200): Promise<string | null> {
   return new Promise((resolve) => {
     const proc = spawn("git", args, {
       stdio: ["ignore", "pipe", "pipe"],
+      // Git's read-only status commands can otherwise refresh the index and
+      // contend with an interactive Git operation. Hide the spawned console on
+      // Windows so background polling never flashes a window.
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+      windowsHide: true,
     });
 
     let stdout = "";
@@ -218,7 +223,9 @@ export function getGitStatus(providerBranch: string | null, pollingMode: GitPoll
  * Force refresh git status (call when you know files changed)
  */
 export function invalidateGitStatus(): void {
-  cachedStatus = null;
+  // Expire rather than discard the last known result. The render path can
+  // continue showing it while the replacement fetch runs, avoiding flicker.
+  if (cachedStatus) cachedStatus.timestamp = 0;
   invalidationCounter++; // Increment to invalidate any pending fetches
 }
 
@@ -226,6 +233,7 @@ export function invalidateGitStatus(): void {
  * Force refresh git branch (call when you know branch might have changed)
  */
 export function invalidateGitBranch(): void {
-  cachedBranch = null;
+  // Serve the previous branch until the asynchronous refresh completes.
+  if (cachedBranch) cachedBranch.timestamp = 0;
   branchInvalidationCounter++;
 }

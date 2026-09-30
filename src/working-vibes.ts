@@ -181,6 +181,9 @@ async function generate(task: string): Promise<string> {
   try {
     const response = await complete(model, aiContext, { apiKey: auth.apiKey, headers: auth.headers, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(3000)]) });
     const text = response.content.find((part) => part.type === "text")?.text;
+    if (!text && response.stopReason === "error" && response.errorMessage) {
+      console.debug(`[stickybar] Vibe generation failed for ${settings.model}: ${response.errorMessage}`);
+    }
     if (!text || controller.signal.aborted || version !== settingsVersion) return fallback();
     const value = message(text.split("\n")[0] ?? "");
     recent = [value, ...recent.filter((item) => item !== value)].slice(0, settings.lookback);
@@ -304,7 +307,16 @@ export async function generateVibesBatch(theme: string, count = 100): Promise<{ 
   };
   try {
     const response = await complete(model, aiContext, { apiKey: auth.apiKey, headers: auth.headers, signal: AbortSignal.timeout(1_200_000) });
-    const values = (response.content.find((part) => part.type === "text")?.text ?? "").split(/\r?\n/).map(message).filter((value) => value !== "...");
+    const text = response.content.find((part) => part.type === "text")?.text;
+    if (!text) {
+      return {
+        success: false,
+        count: 0,
+        filePath,
+        error: response.stopReason === "error" && response.errorMessage ? response.errorMessage : "No vibes generated",
+      };
+    }
+    const values = text.split(/\r?\n/).map(message).filter((value) => value !== "...");
     if (!values.length) return { success: false, count: 0, filePath, error: "No vibes generated" };
     mkdirSync(vibeDir(), { recursive: true });
     writeFileSync(filePath, values.join("\n") + "\n");
