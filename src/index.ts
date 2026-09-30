@@ -1,4 +1,4 @@
-import { CONFIG_DIR_NAME, copyToClipboard, CustomEditor, getAgentDir, type ExtensionAPI, type ReadonlyFooterDataProvider, type Theme } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, CustomEditor, getAgentDir, type ExtensionAPI, type ReadonlyFooterDataProvider, type Theme } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { existsSync, readFileSync } from "node:fs";
@@ -6,13 +6,9 @@ import { join } from "node:path";
 
 
 import { readCoreContextUsage } from "./context-usage.ts";
-import { renderFixedEditorCluster } from "./fixed-editor/cluster.ts";
-import { collectMessageBoundaries, locateMessageContainer } from "./fixed-editor/message-boundaries.ts";
-import { emergencyTerminalModeReset, TerminalSplitCompositor } from "./fixed-editor/terminal-split.ts";
 import { getGitStatus, invalidateGitBranch, invalidateGitStatus, onGitStatusChange } from "./git-status.ts";
 import {
   collectHiddenExtensionStatusKeys,
-  getNotificationExtensionStatuses,
   mergeSegmentOptions,
   parseStickybarConfig,
 } from "./stickybar-config.ts";
@@ -83,7 +79,6 @@ export default function stickybar(pi: ExtensionAPI) {
   let footerData: ReadonlyFooterDataProvider | null = null;
   let tui: any = null;
   let editor: any = null;
-  let compositor: TerminalSplitCompositor | null = null;
   let sessionStartedAt: number | null = null;
   let frozenElapsedMs = 0;
   let streaming = false;
@@ -100,10 +95,8 @@ export default function stickybar(pi: ExtensionAPI) {
     try {
       tui?.requestRender();
     } catch (error) {
-      // Do not let a late render failure take down Pi after startup. The
-      // compositor can be removed safely and Pi will retain its native UI.
-      console.debug("[stickybar] Render failed; disabling fixed editor:", error);
-      disposeCompositor(true);
+      // Late UI failures must not take down Pi's native TUI.
+      console.debug("[stickybar] Render failed:", error);
     }
   }, STATUS_RENDER_DEBOUNCE_MS);
   const invalidate = (immediate = false) => {
@@ -187,25 +180,12 @@ export default function stickybar(pi: ExtensionAPI) {
     return value;
   }
 
-  function removeLeadingMargin(line: string): string {
-    const match = line.match(/^((?:\x1b\[[0-9;]*m)*)\s+/);
-    return match ? `${match[1]}${line.slice(match[0].length)}` : line;
-  }
-
   function lastPromptLines(width: number, theme: Theme): string[] {
     if (!config.showLastPrompt || !lastUserPrompt) return [];
     const prefix = theme.fg("dim", "↳ ");
     const available = width - visibleWidth(prefix);
     if (available < 8) return [];
     return [`${prefix}${theme.fg("dim", truncateToWidth(lastUserPrompt.replace(/\s+/g, " ").trim(), available, "…"))}`];
-  }
-
-  function notificationLines(width: number): string[] {
-    if (!footerData) return [];
-    const hidden = collectHiddenExtensionStatusKeys(config.customItems);
-    return getNotificationExtensionStatuses(footerData.getExtensionStatuses(), hidden)
-      .filter((line) => visibleWidth(line) <= width)
-      .map((line) => ` ${line}`);
   }
 
   function topLines(width: number, theme: Theme): string[] {
@@ -218,90 +198,6 @@ export default function stickybar(pi: ExtensionAPI) {
     return line ? [line] : [];
   }
 
-  function disposeCompositor(resetTerminal = false): void {
-    const hadCompositor = compositor !== null;
-    compositor?.dispose({ resetExtendedKeyboardModes: resetTerminal });
-    if (!hadCompositor && resetTerminal) process.stdout.write(emergencyTerminalModeReset());
-    compositor = null;
-  }
-
-  function parentOf(child: unknown): { container: any; index: number } | null {
-    const children = Array.isArray(tui?.children) ? tui.children : [];
-    const index = children.findIndex((candidate: any) => Array.isArray(candidate?.children) && candidate.children.includes(child));
-    return index < 0 ? null : { container: children[index], index };
-  }
-
-  function installCompositor(ctx: any): boolean {
-    disposeCompositor();
-    // Pi 0.84's fullscreen renderer already owns a sticky editor/footer and an
-    // independently scrolling transcript. Do not install the regular-mode
-    // terminal compositor on top of it.
-    if (ctx.ui?.mode === "fullscreen") return false;
-    if (!config.fixedEditor || !ctx.hasUI || !editor || !tui?.terminal) return false;
-    const match = parentOf(editor);
-    if (!match) return false;
-    const children = tui.children as any[];
-    const editorContainer = match.container;
-    const statusContainer = children[match.index - 2];
-    const above = children[match.index - 1];
-    const below = children[match.index + 1];
-    const fallbackTheme = ctx.ui.theme;
-    let instance: TerminalSplitCompositor;
-    instance = new TerminalSplitCompositor({
-      tui,
-      terminal: tui.terminal,
-      mouseScroll: config.mouseScroll,
-      onCopySelection: copyToClipboard,
-      getShowHardwareCursor: () => tui.getShowHardwareCursor?.() ?? false,
-      getMessageBoundaries: (width) => {
-        const location = locateMessageContainer(Array.isArray(tui?.children) ? tui.children : []);
-        return location
-          ? collectMessageBoundaries(location.precedingContainers, location.chatContainer, width)
-          : [];
-      },
-      previousMessageKey: config.chatNavigation.previousKey,
-      nextMessageKey: config.chatNavigation.nextKey,
-      renderCluster: (width, rows) => {
-        const theme = currentCtx?.ui?.theme ?? fallbackTheme;
-        const nativeStatusLines = statusContainer?.render ? instance.renderHidden(statusContainer, width) : [];
-        // Pi may emit blank/status helper rows before the actual working text.
-        // Keep exactly the last visible row as the stable themed-working slot.
-        const visibleWorkingLine = nativeStatusLines.filter((line) => visibleWidth(line) > 0).at(-1) ?? "";
-        const vibeStatusLine = config.vibe.theme ? [visibleWorkingLine] : nativeStatusLines;
-        return renderFixedEditorCluster({
-          width,
-          terminalRows: rows,
-          statusLines: [
-            ...(above?.render ? instance.renderHidden(above, width) : []),
-            ...notificationLines(width),
-            ...vibeStatusLine,
-          ].map(removeLeadingMargin),
-          topLines: topLines(width, theme),
-          editorLines: instance.renderHidden(editorContainer, width),
-          secondaryLines: [...bottomLines(width, theme), ...(below?.render ? instance.renderHidden(below, width) : [])],
-          lastPromptLines: lastPromptLines(width, theme),
-        });
-      },
-    });
-    compositor = instance;
-    if (statusContainer?.render) instance.hideRenderable(statusContainer);
-    if (above?.render) instance.hideRenderable(above);
-    instance.hideRenderable(editorContainer);
-    if (below?.render) instance.hideRenderable(below);
-    try {
-      instance.install();
-      tui.requestRender(true);
-      return true;
-    } catch (error) {
-      // A Pi/TUI internal layout change should never make Pi itself fail to
-      // start. Restore the terminal and fall back to ordinary widgets.
-      compositor = instance;
-      disposeCompositor(true);
-      console.debug("[stickybar] Fixed editor unavailable; using widgets instead:", error);
-      return false;
-    }
-  }
-
   function installWidgets(ctx: any): void {
     ctx.ui.setWidget("stickybar-top", (_tui: any, theme: Theme) => ({ render: (width: number) => topLines(width, theme), invalidate, dispose() {} }), { placement: "aboveEditor" });
     ctx.ui.setWidget("stickybar-bottom", (_tui: any, theme: Theme) => ({ render: (width: number) => bottomLines(width, theme), invalidate, dispose() {} }), { placement: "belowEditor" });
@@ -309,7 +205,6 @@ export default function stickybar(pi: ExtensionAPI) {
   }
 
   function setupUi(ctx: any): void {
-    disposeCompositor();
     ctx.ui.setWidget("stickybar-top", undefined);
     ctx.ui.setWidget("stickybar-bottom", undefined);
     ctx.ui.setWidget("stickybar-last-prompt", undefined);
@@ -321,7 +216,6 @@ export default function stickybar(pi: ExtensionAPI) {
         get: () => submit,
         set: (handler: unknown) => {
           submit = typeof handler === "function" ? (text: string) => {
-            compositor?.jumpToRootBottom();
             (handler as (value: string) => void)(text);
           } : handler;
         },
@@ -354,7 +248,6 @@ export default function stickybar(pi: ExtensionAPI) {
       return next;
     };
     ctx.ui.setEditorComponent(factory);
-    const fullscreen = ctx.ui?.mode === "fullscreen";
     ctx.ui.setFooter((footerTui: any, _theme: Theme, data: ReadonlyFooterDataProvider) => {
       footerData = data;
       tui = footerTui;
@@ -362,15 +255,13 @@ export default function stickybar(pi: ExtensionAPI) {
       const unsubscribe = data.onBranchChange(() => invalidate(true));
       return { render: () => [], invalidate, dispose: () => { unsubscribe(); footerRestore?.(); footerRestore = null; } };
     });
-    // Fullscreen Pi already owns the terminal compositor. Keep Stickybar's
-    // status rows as widgets there, but never patch the fullscreen renderer.
-    const compositorInstalled = config.fixedEditor && !fullscreen ? installCompositor(ctx) : false;
-    if (!compositorInstalled) installWidgets(ctx);
+    // Pi owns transcript scrolling, selection, and clipboard behavior in both
+    // terminal modes. Fullscreen mode supplies Pi's native fixed editor.
+    installWidgets(ctx);
   }
 
   function recoverUiAfterSetupFailure(ctx: any, error: unknown): void {
     console.debug("[stickybar] UI setup failed; restoring Pi's native UI:", error);
-    try { disposeCompositor(true); } catch (resetError) { console.debug("[stickybar] Terminal reset failed:", resetError); }
     try { ctx.ui.setEditorComponent(undefined); } catch (restoreError) { console.debug("[stickybar] Editor restore failed:", restoreError); }
     try { ctx.ui.setFooter(undefined); } catch (restoreError) { console.debug("[stickybar] Footer restore failed:", restoreError); }
     footerData = null;
@@ -390,7 +281,7 @@ export default function stickybar(pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const words = args.trim().split(/\s+/).filter(Boolean);
       if (!words.length) {
-        ctx.ui.notify(`Stickybar: fixed editor ${config.fixedEditor ? "on" : "off"}; vibe ${config.vibe.theme ?? "off"}`, "info");
+        ctx.ui.notify(`Stickybar: Pi-native layout; vibe ${config.vibe.theme ?? "off"}`, "info");
         return;
       }
       if (words[0] !== "vibe") {
@@ -455,7 +346,6 @@ export default function stickybar(pi: ExtensionAPI) {
     footerRestore = null;
     removeGitStatusListener?.();
     removeGitStatusListener = null;
-    disposeCompositor(event.reason === "quit" || event.reason === "reload");
     currentCtx = null;
     footerData = null;
     tui = null;

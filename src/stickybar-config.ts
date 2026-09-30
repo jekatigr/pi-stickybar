@@ -1,4 +1,4 @@
-import { visibleWidth, type KeyId } from "@earendil-works/pi-tui";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import type {
   BuiltinStatusLineSegmentId,
   CustomStatusItem,
@@ -26,18 +26,7 @@ const DEFAULT_VIBE: VibeSettings = {
   lookback: 30,
 };
 
-const DEFAULT_CHAT_NAVIGATION: StickybarConfig["chatNavigation"] = { previousKey: "ctrl+alt+up", nextKey: "ctrl+alt+down" };
-const NAVIGATION_KEY_BASES = new Set([
-  ..."abcdefghijklmnopqrstuvwxyz0123456789",
-  "`", "-", "=", "[", "]", "\\", ";", "'", ",", ".", "/", "!", "@", "#", "$", "%", "^", "&", "*", "(", ")", "_", "+", "|", "~", "{", "}", ":", "<", ">", "?",
-  "escape", "esc", "enter", "return", "tab", "space", "backspace", "delete", "insert", "clear", "home", "end", "pageup", "pagedown", "up", "down", "left", "right",
-  ...Array.from({ length: 12 }, (_, index) => `f${index + 1}`),
-]);
-const NAVIGATION_KEY_MODIFIERS = new Set(["ctrl", "shift", "alt", "super"]);
-
 export const DEFAULT_STICKYBAR_CONFIG: StickybarConfig = {
-  fixedEditor: true,
-  mouseScroll: true,
   showLastPrompt: true,
   top: DEFAULT_TOP,
   bottom: DEFAULT_BOTTOM,
@@ -48,7 +37,6 @@ export const DEFAULT_STICKYBAR_CONFIG: StickybarConfig = {
   },
   customItems: [],
   vibe: DEFAULT_VIBE,
-  chatNavigation: DEFAULT_CHAT_NAVIGATION,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -160,31 +148,6 @@ function parseVibe(value: unknown): VibeSettings {
   };
 }
 
-function parseChatNavigationKey(value: unknown, fallback: KeyId | null): KeyId | null {
-  if (value === null || value === "") return null;
-  if (typeof value !== "string") return fallback;
-
-  let key = value.trim().toLowerCase();
-  if (!key) return null;
-  const modifiers = new Set<string>();
-  while (true) {
-    const match = /^(ctrl|shift|alt|super)\+/.exec(key);
-    if (!match) break;
-    if (modifiers.has(match[1])) return fallback;
-    modifiers.add(match[1]);
-    key = key.slice(match[0].length);
-  }
-  return NAVIGATION_KEY_BASES.has(key) ? value.trim() as KeyId : fallback;
-}
-
-function parseChatNavigation(value: unknown): StickybarConfig["chatNavigation"] {
-  if (!isRecord(value)) return { ...DEFAULT_CHAT_NAVIGATION };
-  return {
-    previousKey: parseChatNavigationKey(value.previousKey, DEFAULT_CHAT_NAVIGATION.previousKey),
-    nextKey: parseChatNavigationKey(value.nextKey, DEFAULT_CHAT_NAVIGATION.nextKey),
-  };
-}
-
 /** Reads only the canonical `stickybar` object. Legacy shapes intentionally fall back to defaults. */
 export function parseStickybarConfig(value: unknown): StickybarConfig {
   if (!isRecord(value)) return structuredClone(DEFAULT_STICKYBAR_CONFIG);
@@ -195,28 +158,17 @@ export function parseStickybarConfig(value: unknown): StickybarConfig {
   const topIds = new Set(top);
   const bottom = parseSegmentList(value.bottom, DEFAULT_BOTTOM).filter((id) => known(id) && !topIds.has(id));
   return {
-    fixedEditor: value.fixedEditor !== false,
-    mouseScroll: value.mouseScroll !== false,
     showLastPrompt: value.showLastPrompt !== false,
     top,
     bottom,
     options: mergeSegmentOptions(DEFAULT_STICKYBAR_CONFIG.options, parseOptions(value.options)),
     customItems,
     vibe: parseVibe(value.vibe),
-    chatNavigation: parseChatNavigation(value.chatNavigation),
   };
 }
 
 export function collectHiddenExtensionStatusKeys(customItems: readonly CustomStatusItem[]): Set<string> {
   return new Set(customItems.filter((item) => item.excludeFromExtensionStatuses).map((item) => item.statusKey));
-}
-
-export function isNotificationExtensionStatus(value: string): boolean {
-  return value.trimStart().startsWith("[");
-}
-
-export function getNotificationExtensionStatuses(statuses: ReadonlyMap<string, string>, hiddenKeys: ReadonlySet<string>): string[] {
-  return [...statuses].flatMap(([key, value]) => hiddenKeys.has(key) || !isNotificationExtensionStatus(value) ? [] : [value]);
 }
 
 export function normalizeExtensionStatusValue(value: string): string | null {
@@ -225,5 +177,5 @@ export function normalizeExtensionStatusValue(value: string): string | null {
 }
 
 export function normalizeCompactExtensionStatus(value: string): string | null {
-  return isNotificationExtensionStatus(value) ? null : normalizeExtensionStatusValue(value);
+  return value.trimStart().startsWith("[") ? null : normalizeExtensionStatusValue(value);
 }

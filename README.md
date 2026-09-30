@@ -8,7 +8,7 @@ Input bar extension for [pi](https://github.com/badlogic/pi-mono) coding agent.
 
 ## Features
 
-- **Fixed editor** - prompt is always visible
+- **Native Pi TUI** — Pi owns the fixed editor, transcript scrolling, selection, and clipboard behavior in fullscreen mode
 - **Two configurable status rows** with model, git state and more, check table below
 - **Last-prompt preview** under the input prompt line
 - **Themed working vibes:** generated realtime based on your input or loaded from a local file, with optional rainbow animation and character-by-character printing.
@@ -32,8 +32,6 @@ Full configuration example:
 ```json
 {
   "stickybar": {
-    "fixedEditor": true,
-    "mouseScroll": true,
     "showLastPrompt": true,
 
     "top": [
@@ -75,11 +73,6 @@ Full configuration example:
       "prompt": "Generate a {theme} loading message for: {task}. {exclude}",
       "maxLength": 65,
       "lookback": 30
-    },
-
-    "chatNavigation": {
-      "previousKey": "ctrl+alt+up",
-      "nextKey": "ctrl+alt+down"
     }
   }
 }
@@ -158,26 +151,23 @@ Extensions publish a value with:
 ctx.ui.setStatus("ci-status", "passing");
 ```
 
-### Chat navigation (fixed editor only)
+### Native Pi fullscreen mode
 
-When `fixedEditor` is on, `chatNavigation.previousKey`/`nextKey` jump the scrollable transcript to the previous/next user prompt (a single agent turn can render several assistant/tool-call components in a row, so only user prompts are used as jump targets - assistant replies are skipped). Defaults are `ctrl+alt+up` / `ctrl+alt+down`, which avoid Pi's existing `ctrl+o` and `ctrl+p` bindings. Once there's no earlier/later prompt left, the shortcut lands on the very start/end of the thread instead of doing nothing.
-
-Some terminals and IDE-embedded terminals (e.g. IntelliJ's terminal tool window) reserve modified arrow keys for their own scrollback or do not forward them to Pi. If a shortcut appears to "just scroll" instead of jumping to a message, override it with another key combination in `chatNavigation`.
-
-If the defaults collide with something in your setup, override them:
+StickyBar does not implement a transcript viewport, mouse selection, or clipboard copy path. Pi owns those concerns. To use a fixed editor with a scrollable transcript, enable Pi's native fullscreen TUI in the top-level Pi settings (outside the `stickybar` object):
 
 ```json
 {
+  "tuiMode": "fullscreen",
+  "fullscreenCopyOnSelect": false,
   "stickybar": {
-    "chatNavigation": {
-      "previousKey": "ctrl+alt+t",
-      "nextKey": "ctrl+alt+y"
-    }
+    "showLastPrompt": true
   }
 }
 ```
 
-Avoid `ctrl+[` (identical to plain `Escape` on every ANSI terminal - Pi uses `Escape` to cancel/close overlays) and `ctrl+]` (already bound by Pi's editor to "jump forward to character"). Set a key to `null` or `""` to disable it entirely.
+`fullscreenCopyOnSelect` is a Pi setting. It is set to `false` above so Pi keeps the selection active and handles copying through its native keybinding rather than automatically writing to the clipboard. Set it to `true` if you prefer Pi's automatic copy-on-selection behavior.
+
+In Pi's regular mode, StickyBar renders its status widgets only; normal terminal scrollback and selection remain in control.
 
 ### Working vibes
 
