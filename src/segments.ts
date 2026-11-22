@@ -59,7 +59,7 @@ const segments: StatusLineSegment[] = [
     const total = ctx.usageStats.input + ctx.usageStats.output + ctx.usageStats.cacheRead + ctx.usageStats.cacheWrite;
     return total ? { content: color(ctx.theme, "tokens", `tok:${formatTokens(total)}`), visible: true } : { content: "", visible: false };
   }),
-  simple("cost", (ctx) => ctx.usingSubscription || ctx.usageStats.cost ? { content: color(ctx.theme, "cost", ctx.usingSubscription ? "sub" : `$${ctx.usageStats.cost.toFixed(2)}`), visible: true } : { content: "", visible: false }),
+  simple("cost", (ctx) => ctx.usingSubscription || ctx.usageStats.cost ? { content: color(ctx.theme, "cost", ctx.usingSubscription ? `$${ctx.usageStats.cost.toFixed(2)} (sub)` : `$${ctx.usageStats.cost.toFixed(2)}`), visible: true } : { content: "", visible: false }),
   simple("context_pct", (ctx) => {
     if (ctx.customCompactionEnabled || !ctx.contextWindow) return { content: "", visible: false };
     const shade: SemanticColor = ctx.contextPercent !== null && ctx.contextPercent > 90
