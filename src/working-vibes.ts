@@ -179,7 +179,7 @@ async function generate(task: string): Promise<string> {
     messages: [{ role: "user", content: [{ type: "text", text: prompt(task, settings) }], timestamp: Date.now() }],
   };
   try {
-    const response = await complete(model, aiContext, { apiKey: auth.apiKey, headers: auth.headers, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(3000)]) });
+    const response = await complete(model, aiContext, { apiKey: auth.apiKey, headers: auth.headers, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
     const text = response.content.find((part) => part.type === "text")?.text;
     if (!text && response.stopReason === "error" && response.errorMessage) {
       console.debug(`[stickybar] Vibe generation failed for ${settings.model}: ${response.errorMessage}`);
